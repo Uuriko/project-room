@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { replyDraftKey, replyDraftData, validReplyDraft, replyFollowUp, confirmsReplyCommand } from "../src/reply-requests.js";
+import { replyDraftKey, replyDraftData, validReplyDraft, replyFollowUp, sourceReferenceRequest, confirmsReplyCommand } from "../src/reply-requests.js";
 import { ConversationDrafts, DraftRecovery } from "../src/conversation.js";
 import { draftCommand, RoomClient } from "../src/client.js";
 
@@ -129,4 +129,32 @@ test("attachment-only drafts retain bounded metadata and original commit target,
   const restored = recovery.read("scope", state()).drafts.get(null).files;
   assert.deepEqual(restored, [{ id: "file-1", filename: "note.txt", mediaType: "text/plain", status: "error", commitMessageId: "posted-message" }]);
   assert.equal(recovery.read("other-scope", state()), null);
+});
+
+test("a source replacement draft stays private and bound to the original assignment", () => {
+  const work = { id: "document-work", proposedById: "owner", accountableMemberId: "guest", sourceMessageId: "old-source" };
+  const snapshot = { ...state(), workItems: { [work.id]: work } };
+  assert.equal(sourceReferenceRequest(snapshot, work, "owner"), null);
+  assert.equal(sourceReferenceRequest(snapshot, work, "stranger"), null);
+  const selected = sourceReferenceRequest(snapshot, work, "guest");
+  assert.ok(validReplyDraft(selected, snapshot));
+  assert.equal(validReplyDraft({ ...selected, recipientId: "guest" }, snapshot), false);
+  assert.notEqual(replyDraftKey(selected), replyDraftKey({ kind: "request" }));
+  const data = replyDraftData(selected, { body: "A fresh link, please.", toMemberId: "stranger", replyToId: "old-source",
+    messageId: "replacement-ask", channelId: "general" });
+  assert.deepEqual(data, { messageId: "replacement-ask", body: "A fresh link, please.",
+    toMemberId: "owner", replyToId: null, workItemId: "document-work", requestKind: "reply", channelId: "general" });
+
+  const memory = new Map(), storage = { getItem: k => memory.get(k), setItem: (k, v) => memory.set(k, v), removeItem: k => memory.delete(k) };
+  const recovery = new DraftRecovery(storage, () => 1000), drafts = new ConversationDrafts();
+  const key = replyDraftKey(selected);
+  drafts.save(key, { body: data.body, toMemberId: "owner", replyToId: null, mode: selected,
+    threadId: null, channelId: "general", pending: draftCommand(null, "message.posted", data) });
+  recovery.write("scope", drafts, null, key);
+  const restored = recovery.read("scope", snapshot, { viewerId: "guest" }).drafts.get(key);
+  assert.equal(restored.body, data.body);
+  assert.equal(restored.pending.command.data.toMemberId, "owner");
+  assert.equal(recovery.read("scope", snapshot, { viewerId: "owner" })?.drafts.entries.has(key) ?? false, false);
+  work.sourceMessageId = "new-source";
+  assert.equal(validReplyDraft(selected, snapshot), false);
 });

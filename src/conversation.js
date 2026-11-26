@@ -607,7 +607,7 @@ export class DraftRecovery {
     if (restored) this.deferredReply = null;
     return restored ?? null;
   }
-  read(scope, state, { deferResultHref = null, onlyKey = null } = {}) {
+  read(scope, state, { deferResultHref = null, onlyKey = null, viewerId = null } = {}) {
     try {
       if (onlyKey === null) this.deferredReply = null;
       if (typeof scope !== "string" || !scope) { this.clear(); return null; }
@@ -646,6 +646,8 @@ export class DraftRecovery {
             || d.replyToId !== null && (!index.byId.has(d.replyToId) || index.rootById.get(d.replyToId) !== d.threadId)) continue;
           if (d.mode.kind === "request" && d.toMemberId && !state.members[d.toMemberId]) continue;
           if (d.mode.followUpRequestId && (d.replyToId !== d.mode.responseMessageId || d.toMemberId !== d.mode.recipientId)) continue;
+          if (d.mode.sourceReference && (d.replyToId !== null || d.threadId !== null || d.toMemberId !== d.mode.recipientId
+            || state.workItems?.[d.mode.workItemId]?.accountableMemberId !== viewerId)) continue;
           if (d.mode.kind === "request" && d.mode.resultEventId && d.replyToId !== d.mode.resultMessageId) continue;
           if (d.mode.kind !== "request" && (d.replyToId !== d.mode.requestMessageId || d.toMemberId !== d.mode.requesterId)) continue;
           let pending = null;

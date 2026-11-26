@@ -46,6 +46,7 @@ export function checkReceiverRoute(scope, { requesterId, workItemId, id: request
 export function replyDraftKey(mode, threadId = null) {
   if (mode?.kind === "request" && mode.followUpRequestId) return JSON.stringify(["follow-up", mode.followUpRequestId]);
   if (mode?.kind === "request" && mode.resultEventId) return JSON.stringify(["result-question", mode.workItemId, mode.resultEventId]);
+  if (mode?.kind === "request" && mode.sourceReference) return JSON.stringify(["source-reference", mode.workItemId, mode.sourceReference]);
   return mode ? JSON.stringify(["request", mode.kind, mode.requestMessageId ?? threadId]) : threadId;
 }
 const resultReceipt = (state, mode) => {
@@ -75,6 +76,13 @@ export function replyFollowUp(state, requestId, memberId) {
     responseMessageId: request.responseMessageId, workItemId: request.workItemId };
   return validReplyDraft(mode, state) ? { mode, toMemberId: mode.recipientId, replyToId: mode.responseMessageId } : null;
 }
+export function sourceReferenceRequest(state, work, viewerId) {
+  const recipientId = work?.proposedById, member = state.members?.[recipientId];
+  if (!work || work.accountableMemberId !== viewerId || !id(work.id) || !id(work.sourceMessageId)
+      || recipientId === viewerId || !member || member.active === false || member.identityRevoked) return null;
+  return { kind: "request", workItemId: work.id, sourceReference: work.sourceMessageId, recipientId };
+}
+
 export function validReplyDraft(mode, state) {
   if (!mode || typeof mode !== "object" || Array.isArray(mode)) return false;
   if (mode.kind === "request") {
@@ -86,6 +94,12 @@ export function validReplyDraft(mode, state) {
         && request?.status === "answered" && mode.recipientId === request.recipientId
         && mode.responseMessageId === request.responseMessageId && mode.workItemId === request.workItemId
         && state.messages?.some(message => message.id === mode.responseMessageId);
+    }
+    if (own(mode, "sourceReference")) {
+      const work = state.workItems?.[mode.workItemId];
+      const basis = work && sourceReferenceRequest(state, work, work.accountableMemberId);
+      return Boolean(basis) && Object.keys(mode).length === Object.keys(basis).length
+        && Object.keys(basis).every(key => mode[key] === basis[key]);
     }
     const keys = ["kind", "workItemId", "resultEventId", "resultMessageId"], receipt = resultReceipt(state, mode);
     return Object.keys(mode).length === keys.length && keys.every(key => own(mode, key))
@@ -109,7 +123,8 @@ export function replyDraftData(mode, { body, toMemberId, replyToId, messageId, c
   const data = mode.kind === "request" ? { messageId, body, toMemberId, replyToId, requestKind: "reply",
       ...(channelId === undefined ? {} : { channelId }),
       ...(mode.followUpRequestId ? { toMemberId: mode.recipientId, replyToId: mode.responseMessageId, workItemId: mode.workItemId } : {}),
-      ...(mode.resultEventId ? { workItemId: mode.workItemId, replyToId: mode.resultMessageId } : {}) }
+      ...(mode.resultEventId ? { workItemId: mode.workItemId, replyToId: mode.resultMessageId } : {}),
+      ...(mode.sourceReference ? { workItemId: mode.workItemId, toMemberId: mode.recipientId, replyToId: null } : {}) }
     : { messageId, body, toMemberId: mode.requesterId, replyToId: mode.requestMessageId,
       workItemId: mode.workItemId, responseToRequestId: mode.requestMessageId,
       expectedRequestRevision: mode.expectedRequestRevision, responseOutcome: mode.kind,

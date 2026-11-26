@@ -1212,3 +1212,78 @@ for (const anchor of ["root", "reply"]) {
     }
   });
 }
+
+test("private document handoff keeps source access with the recipient's document account", { timeout: 30000 }, async t => {
+  const f = await setup(t, 390);
+  const doc = "http://localhost:47361/private-launch-brief";
+  const workId = "review-private-launch-brief", sourceId = "launch-brief-assignment";
+  f.send("owner", T.MESSAGE_POSTED, { messageId: sourceId, toMemberId: "human-checker", body: `Please check the wording in ${doc}` });
+  f.send("owner", T.WORK_PROPOSED, { workItemId: workId, title: "Review the private launch brief",
+    definitionOfDone: "Check the wording", accountableMemberId: "human-checker", mode: "read", sourceMessageId: sourceId });
+  const start = `${f.origin}/?room=commons#pr-record/work/${workId}`;
+  const recipient = await f.login("human-checker", start);
+  const context = recipient.context();
+  let reads = 0;
+  const canRead = new Set(["document-owner"]);
+  await context.addCookies([{ name: "documentAccount", value: "recipient-document-account", url: doc }]);
+  await context.route(doc, async route => {
+    reads += 1;
+    const cookie = (await route.request().allHeaders()).cookie;
+    assert.ok(cookie?.includes("documentAccount=recipient-document-account"));
+    const granted = canRead.has("recipient-document-account");
+    await route.fulfill({ status: granted ? 200 : 403, contentType: "text/html",
+      body: granted ? "<p>Private source opened</p>" : "<p>Request access from the document owner</p>" });
+  });
+  await recipient.locator(`[data-work-record-id="${workId}"] [data-open-message="${sourceId}"]`).press("Enter");
+  const link = recipient.locator(`[data-message-record-id="${sourceId}"] a[href="${doc}"]`);
+  await link.waitFor();
+  assert.equal(reads, 0, "Room must never consult the document provider");
+  async function openDocument() {
+    const popup = recipient.waitForEvent("popup");
+    await link.press("Enter");
+    const docPage = await popup;
+    t.after(() => docPage.close());
+    return docPage;
+  }
+  const refused = await openDocument();
+  await refused.getByText("Request access from the document owner").waitFor();
+  await refused.close();
+  assert.equal(reads, 1);
+  const request = recipient.getByRole("button", { name: "Ask for an accessible reference", exact: true });
+  if (process.env.ROOM_TEST_CAPTURE) {
+    await recipient.screenshot({ path: join(process.env.ROOM_TEST_CAPTURE, "private-document-recipient.png") });
+  }
+  await request.press("Enter", { timeout: 1500 });
+  const draft = recipient.locator("#message-input");
+  assert.equal(await draft.evaluate(node => node === document.activeElement), true);
+  assert.match(await draft.inputValue(), /Review the private launch brief/);
+  assert.doesNotMatch(await draft.inputValue(), /localhost|private-launch-brief/);
+  assert.equal(await recipient.locator("#message-to-select").inputValue(), "owner");
+  await recipient.locator('#message-form button[type="submit"]').press("Enter");
+  await recipient.waitForFunction(() => document.querySelector("#message-input").value === "");
+  const room = f.store.room("commons").state;
+  const [ask] = Object.values(room.replyRequests).filter(request => request.workItemId === workId);
+  assert.equal(ask.requesterId, "human-checker");
+  assert.equal(ask.recipientId, "owner");
+  assert.doesNotMatch(room.messages.find(message => message.id === ask.id).body, /localhost|private-launch-brief/);
+
+  await recipient.goto(start);
+  await recipient.locator(`[data-work-record-id="${workId}"] [data-open-message="${sourceId}"]`).press("Enter");
+  canRead.add("recipient-document-account");
+  const reopened = await openDocument();
+  await reopened.getByText("Private source opened").waitFor();
+  assert.equal(reads, 2);
+  await reopened.close();
+
+  const outsider = await f.login("guest", start);
+  const sourceQuery = new URLSearchParams({ workItemId: workId, includeSource: "true" });
+  const outsiderRead = await fetch(`${f.origin}/api/rooms/commons/work-context?${sourceQuery}`, {
+    headers: { authorization: `Bearer ${f.keys.guest}` },
+  });
+  const outsiderBody = await outsiderRead.json();
+  assert.doesNotMatch(JSON.stringify(outsiderBody), /localhost|launch-brief-assignment/);
+  assert.ok([403, 404].includes(outsiderRead.status) || outsiderBody.context?.source?.status === "unavailable");
+  assert.equal(await outsider.locator(`a[href="${doc}"]`).count(), 0);
+  assert.equal(await outsider.getByRole("button", { name: "Ask for an accessible reference", exact: true }).count(), 0);
+  assert.equal(reads, 2);
+});

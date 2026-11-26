@@ -16,7 +16,7 @@ import { RoomClient, draftCommand, draftRefused, retryUnconfirmed } from "./clie
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
 import { workArrivalAnnouncements } from "./work-announcements.js";
-import { menuOpensUp, TIMELINE_WINDOW, windowTimeline, createTimelinePin, arrivalsAfterShown, windowToInclude, conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, observedPresenceLabel, queuedNote, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, memberRowName } from "./conversation.js";
+import { menuOpensUp, TIMELINE_WINDOW, windowTimeline, createTimelinePin, arrivalsAfterShown, windowToInclude, conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, markdownHtml, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, observedPresenceLabel, queuedNote, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, memberRowName } from "./conversation.js";
 // Clip to at most maxUnits UTF-16 units without splitting a grapheme.
 const graphemes = new Intl.Segmenter("en", { granularity: "grapheme" });
 function clipGraphemes(text, maxUnits) {
@@ -48,7 +48,7 @@ import { installWorkspacePreviews } from "./workspace-previews-ui.js";
 import { mountUpdates } from "./updates-ui.js";
 import { installReminders } from "./reminders.js";
 import { installPortableWork, installResultCopy } from "./portable-work.js";
-import { replyDraftKey, replyDraftData, validReplyDraft, replyFollowUp, creditQuestion, confirmsReplyCommand, REPLY_CANCELLED } from "./reply-requests.js";
+import { replyDraftKey, replyDraftData, validReplyDraft, replyFollowUp, creditQuestion, sourceReferenceRequest, confirmsReplyCommand, REPLY_CANCELLED } from "./reply-requests.js";
 import { workHelpContext, validateHelpData } from "./work-help.js";
 import { workOffersContext, validateHelpOfferData } from "./help-offers.js";
 import { installWorkspaceNavigation, nameBeforeFirstRoom } from "./workspace-navigation.js";
@@ -596,6 +596,7 @@ const client = new RoomClient({
       // JDOT-MEMBER-PERMS-UI end
       const exact = partialWorkSnapshot && exactResultDestination(location);
       const saved = recovery.read(draftScope(identity), state, {
+        viewerId: identity.member.id,
         deferResultHref: exact?.roomId === identity.roomId ? exactResultHref(exact) : null
       });
       if (saved) {
@@ -3111,6 +3112,20 @@ async function commitComposerFiles(messageId) {
     await retryComposerFile(file);
   }
 }
+function hasExternalSourceLink(message) {
+  if (!message?.body || message.deletedAt) return false;
+  let external = false;
+  markdownHtml(esc(message.body), href => {
+    const url = URL.parse(href);
+    if (url && url.origin !== location.origin) external = true;
+    return null;
+  });
+  return external;
+}
+function assignmentReferenceMode(work) {
+  if (!work || terminalWork(work) || isRoomArchived(state)) return null;
+  return sourceReferenceRequest(state, work, session.member.id);
+}
 function messageContent(m, cluster = {}, unreadStart = false, members = Object.values(state.members)) {
   const author = state.members[m.authorId];
   const authorLabel = displayName(m.authorId);
@@ -3123,13 +3138,20 @@ function messageContent(m, cluster = {}, unreadStart = false, members = Object.v
     : "";
   const linked = Object.values(state.workItems).filter(i => i.sourceMessageId === m.id || i.id === m.workItemId);
   const parent = conversation.byId.get(m.replyToId);
-  const assignmentUrl = currentWorkOrigin()?.assignmentSourceId === m.id
+  const workOrigin = currentWorkOrigin();
+  const assignmentUrl = workOrigin?.assignmentSourceId === m.id
     ? `${location.origin}${location.pathname}?room=${encodeURIComponent(session.roomId)}` : undefined;
+  const assignment = assignmentUrl && linked.find(work => work.id === workOrigin.assignmentWorkId && work.sourceMessageId === m.id);
+  const externalSource = !muted && assignmentReferenceMode(assignment) && hasExternalSourceLink(m)
+    ? uiText("work.focus.externalSourceHtml", {
+      hint: esc(uiText("work.focus.externalSourceHint")), workId: esc(assignment.id),
+      action: esc(uiText("work.focus.askReference")),
+    }) : "";
   const count = (conversation.threads.get(m.id)?.length || 1) - 1;
   const groupedTime = cluster.grouped
     ? `<time class="grouped-time" datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time>`
     : "";
-  return `${divider}${groupedTime}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${isPinned(state, m.id) ? `<span class="pinned-chip">Pinned</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · private</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${parent.deletedAt ? "Message deleted" : esc(clipGraphemes(parent.body ?? "", 90))}</a>` : ""}</div>${muted ? `<p class="message-body message-muted">Hidden: you muted ${esc(authorLabel)}.</p>` : m.deletedAt ? `<p class="message-body message-tombstone">Message deleted</p>` : `<div class="message-body">${bodyHtmlCache.html(m.body, members, esc, m.id, assignmentUrl)}</div>${messageFileChips(m.id)}`}<div class="draft-feedback">${muted ? "" : draftFeedbackHTML(m)}</div>${messageLinksHTML(m, { linked, moderation, count, muted })}</div>`;
+  return `${divider}${groupedTime}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${isPinned(state, m.id) ? `<span class="pinned-chip">Pinned</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · private</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${parent.deletedAt ? "Message deleted" : esc(clipGraphemes(parent.body ?? "", 90))}</a>` : ""}</div>${muted ? `<p class="message-body message-muted">Hidden: you muted ${esc(authorLabel)}.</p>` : m.deletedAt ? `<p class="message-body message-tombstone">Message deleted</p>` : `<div class="message-body">${bodyHtmlCache.html(m.body, members, esc, m.id, assignmentUrl)}</div>${externalSource}${messageFileChips(m.id)}`}<div class="draft-feedback">${muted ? "" : draftFeedbackHTML(m)}</div>${messageLinksHTML(m, { linked, moderation, count, muted })}</div>`;
 }
 function mentionsFilterOn() {
   return $("#search-mentions")?.getAttribute("aria-pressed") === "true";
@@ -3283,9 +3305,9 @@ function syncRequestComposer() {
   requestButton.hidden = !state || active;
   const request = mode?.requestMessageId && state?.replyRequests?.[mode.requestMessageId];
   const changed = request && (request.revision !== mode.expectedRequestRevision || request.contextEventId !== mode.contextEventId);
-  const label = mode?.followUpRequestId ? "Follow up · Earlier exchange included" : mode?.resultEventId ? "Ask about credit" : mode ? ({ request: "Request a reply", answered: "Answer request", declined: "Decline", cancelled: "Cancel request" })[mode.kind] : "";
-  const work = mode?.resultEventId && state?.workItems[mode.workItemId];
-  const subject = work ? work.title + (work.receipt?.eventId !== mode.resultEventId ? " · Earlier result" : "")
+  const label = mode?.followUpRequestId ? "Follow up · Earlier exchange included" : mode?.resultEventId ? "Ask about credit" : mode?.sourceReference ? uiText("work.focus.askReference") : mode ? ({ request: "Request a reply", answered: "Answer request", declined: "Decline", cancelled: "Cancel request" })[mode.kind] : "";
+  const work = (mode?.resultEventId || mode?.sourceReference) && (state?.workItems[mode.workItemId] ?? (inspectedWorkRecord?.id === mode.workItemId ? inspectedWorkRecord : null));
+  const subject = work ? work.title + (mode.resultEventId && work.receipt?.eventId !== mode.resultEventId ? " · Earlier result" : "")
     : request ? (conversation?.byId.get(request.id)?.deletedAt ? "Message deleted" : (conversation?.byId.get(request.id)?.body ?? "").slice(0, 80)) : "";
   setText("#request-mode-label", requestReading ? "Reading request…" : [label, subject, pendingMessage ? "Retry original" : changed ? "Context changed" : ""].filter(Boolean).join(" · "));
   $("#request-refresh").hidden = !request || !changed || Boolean(pendingMessage) || requestReading || request.status !== "open";
@@ -3294,7 +3316,7 @@ function syncRequestComposer() {
   const archived = Boolean(state) && isRoomArchived(state); // Issue #6 A2: an archived room is read only.
   input.readOnly = Boolean(mode && pendingMessage);
   input.disabled = busy || requestReading || archived;
-  select.disabled = busy || requestReading || Boolean(assistantDraft) || Boolean(mode && (mode.kind !== "request" || mode.followUpRequestId || pendingMessage));
+  select.disabled = busy || requestReading || Boolean(assistantDraft) || Boolean(mode && (mode.kind !== "request" || mode.followUpRequestId || mode.sourceReference || pendingMessage));
   select.required = mode?.kind === "request";
   select.setCustomValidity(mode?.kind === "request" && (!select.value || select.value === session?.member.id) ? "Choose another participant." : "");
   renderComposerLength();
@@ -3377,6 +3399,24 @@ document.addEventListener("click", event => {
 });
 $("#request-reply").addEventListener("click", () => { if (!state || busy || requestReading) return; setRequestMode({ kind: "request" }, { toMemberId: $("#message-to-select").value }); });
 document.addEventListener("click", event => {
+  const reference = event.target.closest("[data-ask-source-reference]");
+  if (reference && state && !busy && !requestReading && !isRoomArchived(state)
+      && !composerFiles.some(file => file.status === "uploading")) {
+    const workId = reference.dataset.askSourceReference;
+    const work = state.workItems[workId] ?? (inspectedWorkRecord?.id === workId ? inspectedWorkRecord : null);
+    const sourceMessage = work && conversation?.byId.get(work.sourceMessageId);
+    const origin = currentWorkOrigin();
+    const unavailable = sourceMessage?.deletedAt || work && work === inspectedWorkRecord
+      && ["deleted", "unavailable"].includes(inspectedWorkSource);
+    const external = work && origin?.assignmentWorkId === work.id && origin.assignmentSourceId === work.sourceMessageId
+      && hasExternalSourceLink(sourceMessage);
+    const mode = (unavailable || external) && assignmentReferenceMode(work);
+    if (!mode) return;
+    switchThread(null, false, true, null);
+    setRequestMode(mode, { toMemberId: mode.recipientId, body: uiText("work.focus.referenceRequestBody", { title: work.title }) });
+    $("#message-input").scrollIntoView({ block: "nearest", behavior: "instant" });
+    return;
+  }
   const resume = event.target.closest("[data-resume-credit]");
   if (resume && state && !busy && !requestReading) {
     const saved = drafts.entries.get(resume.dataset.resumeCredit);
@@ -4331,8 +4371,14 @@ function workCard(i, now, drafts, messages = []) {
   const sourceUnavailable = i.sourceMessageId && (conversation?.byId.get(i.sourceMessageId)?.deletedAt
     || i === inspectedWorkRecord && ["deleted", "unavailable"].includes(inspectedWorkSource));
   const sourceHintId = `${workDomId(i.id)}-source-unavailable`;
+  const referenceRequest = sourceUnavailable && assignmentReferenceMode(i);
   const source = !i.sourceMessageId ? "" : sourceUnavailable
-    ? uiText("work.focus.sourceUnavailableHtml", { id: esc(sourceHintId), focusKey: sourceKey })
+    ? referenceRequest
+      ? uiText("work.focus.askReferenceHtml", {
+        id: esc(sourceHintId), workId: esc(i.id), focusKey: sourceKey,
+        unavailable: esc(uiText("work.focus.sourceUnavailable")), action: esc(uiText("work.focus.askReference")),
+      })
+      : uiText("work.focus.sourceUnavailableHtml", { id: esc(sourceHintId), focusKey: sourceKey })
     : `<a class="source-link" href="${esc(recordHref("message", i.sourceMessageId))}" data-open-message="${esc(i.sourceMessageId)}" data-focus-key="${sourceKey}">From this conversation</a>`;
   const continuity = terminalWork(i) ? null : workContinuity(i, now);
   const recovery = continuity?.needsAttention ? `<section class="work-recovery" aria-label="Worker progress"><strong>${esc(continuity.label)}</strong><p>${esc(continuity.next)}</p><button type="button" class="text-button" data-portable-work="${esc(i.id)}" data-portable-progress="true" data-focus-key="work-resume:${esc(i.id)}">Continue with saved context</button></section>` : "";
@@ -5102,6 +5148,14 @@ function submitRequest(form) {
   // used by the disabled button. An uncertain command still retries unchanged.
   if (request && request.status !== "open" && !pendingMessage) return;
   if (!$("#message-input").value.trim()) return;
+  if (mode?.sourceReference && !pendingMessage) {
+    const work = state.workItems[mode.workItemId] ?? (inspectedWorkRecord?.id === mode.workItemId ? inspectedWorkRecord : null);
+    const current = work && !terminalWork(work) && sourceReferenceRequest(state, work, identity.member.id);
+    if (current?.sourceReference !== mode.sourceReference || current.recipientId !== mode.recipientId) {
+      setComposerError(uiText("work.focus.referenceRequestChanged"));
+      return;
+    }
+  }
   const hadPending = Boolean(pendingMessage);
   try {
     if (!pendingMessage) {
@@ -5965,7 +6019,7 @@ $("#main").addEventListener("click", e => {
   if (link.dataset.openMessage && workCard) {
     const id = link.dataset.openMessage;
     const item = state.workItems[workCard.dataset.workRecordId];
-    navigateWorkRecord("message", id, item?.sourceMessageId === id ? { assignmentSourceId: id } : {});
+    navigateWorkRecord("message", id, item?.sourceMessageId === id ? { assignmentSourceId: id, assignmentWorkId: item.id } : {});
     return;
   }
   // JDOT-COH-NAV begin
