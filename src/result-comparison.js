@@ -61,6 +61,15 @@ export function createResultComparison({ client, getState, esc }) {
     resultComparisons.delete(box);
     box.hidden = true; box.replaceChildren();
   }
+  function showEarlierWithdrawal(box, comparison) {
+    comparison.withdrawn = true;
+    if (comparison.previousId === comparison.correctionSourceId) box.querySelector(".result-correction")?.remove();
+    const notice = box.ownerDocument.createElement("p");
+    notice.className = "form-hint";
+    notice.textContent = uiText("result.earlierComparisonWithdrawn");
+    comparison.content.replaceChildren(notice);
+    box.hidden = false;
+  }
   function syncResultComparisons() {
     for (const [box, comparison] of resultComparisons) {
       if (!comparison.owns()) { clearResultComparison(box); continue; }
@@ -70,9 +79,7 @@ export function createResultComparison({ client, getState, esc }) {
         clearResultComparison(box);
         box.textContent = uiText("result.comparisonWithdrawn"); box.hidden = false;
       } else if (!comparison.withdrawn && deleted(comparison.previousId)) {
-        comparison.withdrawn = true;
-        comparison.content.textContent = uiText("result.comparisonWithdrawn");
-        box.hidden = false;
+        showEarlierWithdrawal(box, comparison);
       } else if (comparison.evidenceIds && getState()?.messages.some(message =>
         (message.deletedAt || message.editedAt) && comparison.evidenceIds.has(message.id))) {
         box.querySelector("[data-previous-release-checks]")?.remove();
@@ -108,12 +115,14 @@ export function createResultComparison({ client, getState, esc }) {
       if (!current()) return;
       if (previous.result?.receipt?.eventId !== previousId) throw new Error("Pinned previous version changed");
       const before = previous.result?.text?.body;
-      if (previous.result?.text?.withdrawnAt || text.withdrawnAt) {
-        content.innerHTML = `<p class="form-hint"><strong>Resubmitted result.</strong> ${
-          previous.result?.text?.withdrawnAt ? "The previous version's text has been withdrawn, so the two cannot be compared."
-            : "This version's text has been withdrawn, so the two cannot be compared."
-        }${reviewing ? " " + esc(uiText("result.comparisonApproval")) : ""}</p>`;
+      if (text.withdrawnAt) {
+        clearResultComparison(box);
+        box.textContent = uiText("result.comparisonWithdrawn");
         box.hidden = false;
+        return;
+      }
+      if (previous.result?.text?.withdrawnAt) {
+        showEarlierWithdrawal(box, comparison);
         return;
       }
       if (typeof before !== "string") throw new Error("Previous version has no exact text");

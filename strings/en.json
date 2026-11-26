@@ -574,6 +574,7 @@
   "result.loadingConversation": "Loading conversation…",
   "result.conversationUnavailable": "Conversation unavailable. Reopen the result to try again.",
   "result.comparisonWithdrawn": "A version was withdrawn. Its text is no longer shown in this comparison.",
+  "result.earlierComparisonWithdrawn": "The earlier result was withdrawn. This version is still available.",
   "result.reviewWithdrawn": "This text was withdrawn. Close this review.",
   "result.back": "Back to results",
   "result.collapse": "Collapse result",
