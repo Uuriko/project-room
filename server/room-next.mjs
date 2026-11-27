@@ -209,21 +209,6 @@ function requestPage(store, roomId, auth, cursor, preferRecovery) {
     const isVisible = request => messageInHistory({ id: request.id, createdAt: request.createdAt }, floor);
     const page = loadWindow(position.after);
     const visible = page.requests.filter(isVisible);
-    // Recovery is a hint for the first pickup read. Keep the actual request
-    // page and its continuation identical to the independent inbox read.
-    let recovery;
-    if (preferRecovery && !cursor) {
-      let window = page;
-      for (let n = 0; n <= WORK_SEARCH_WINDOWS; n++) {
-        recovery = window.requests.find(request => request.progressState === "error" && isVisible(request));
-        if (recovery || !window.hasMore || n === WORK_SEARCH_WINDOWS) break;
-        try { window = loadWindow(window.examinedAfter); }
-        catch (error) {
-          if (!(error instanceof CurrentReadBudgetExceeded)) throw error;
-          break;
-        }
-      }
-    }
     const event = store.db.prepare('SELECT sequence FROM events WHERE room_id=? AND id=?');
     let evaluatedThrough = 0;
     for (const request of visible) {
@@ -232,6 +217,21 @@ function requestPage(store, roomId, auth, cursor, preferRecovery) {
         chargeCurrentReadBudget(budget, 128);
         if (!row) throw new ServiceError(409, 'reply_history_changed', 'Request history changed; reconcile before resuming');
         evaluatedThrough = Math.max(evaluatedThrough, row.sequence);
+      }
+    }
+    // Finish the ordinary page before spending its remaining read budget on
+    // an optional recovery hint. Failure to find a hint leaves paging intact.
+    let recovery;
+    if (preferRecovery && !cursor) {
+      try {
+        let window = page;
+        for (let n = 0; n <= WORK_SEARCH_WINDOWS; n++) {
+          recovery = window.requests.find(request => request.progressState === "error" && isVisible(request));
+          if (recovery || !window.hasMore || n === WORK_SEARCH_WINDOWS) break;
+          window = loadWindow(window.examinedAfter);
+        }
+      } catch (error) {
+        if (!(error instanceof CurrentReadBudgetExceeded)) throw error;
       }
     }
     return {
