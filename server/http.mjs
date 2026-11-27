@@ -1172,14 +1172,18 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
     if (streams.size >= STREAM_POOL_LIMIT || sameRoom >= STREAM_PER_ROOM_LIMIT || sameCredential >= 3) reject(429, "stream_limit", "Close another room connection before opening more");
     const agentReceiver = auth.member.kind === "agent";
     const connectedThrough = agentReceiver ? store.headSequence(roomId) : null;
-    const advertisedAt = receiverState ? store.now() : null;
+    let advertisedAt = receiverState ? store.now() : null;
     res.writeHead(200, { "Content-Type": "text/event-stream", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
     res.flushHeaders();
     const entry = { credentialHash: auth.credentialHash, sessionBinding: binding, memberId: auth.member.id, roomId, res, receiverScope,
       get receiverWaitingSince() {
         if (advertisedAt === null) return null;
         const age = store.now() - advertisedAt;
-        return age >= 0 && age < SCOPED_RECEIVER_WAITING_MS ? new Date(advertisedAt).toISOString() : null;
+        if (age < 0 || age >= SCOPED_RECEIVER_WAITING_MS) {
+          advertisedAt = null;
+          return null;
+        }
+        return new Date(advertisedAt).toISOString();
       },
       ...(agentReceiver ? { connectedThrough, receiverCursor: after,
         stillAuthorized: () => {

@@ -118,6 +118,11 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     assert.equal(ready(), false, "expired readiness cannot authorize dispatch");
     assert.equal(server.hasRecoveryReceiver(exact, sequence, true), false, "expired scoped readiness is not a legacy receiver");
 
+    clock = openedAt + 12_000;
+    assert.equal((await preview(owner)).receiver, undefined);
+    assert.equal(ready(), false, "an expired advertisement cannot revive after a clock correction");
+
+    clock = openedAt + 24_000;
     const renewed = await open(keys.receiver, advertised, true);
     assert.equal(renewed.status, 200);
     assert.equal((await preview(owner)).receiver?.since, new Date(clock).toISOString());
