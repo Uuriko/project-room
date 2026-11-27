@@ -76,6 +76,25 @@ instead of attempting a start. Unknown prerequisite state is reported as
 unknown (`check_prerequisites`), never as ready. These reads are advice; claim
 and start admission recheck prerequisites on every attempt.
 
+## Prepare several tasks for pickup
+
+Turn existing QA findings, review gaps or user journeys into separate Work
+Threads. Give each item a named assignee, an exact source or journey and a
+result someone can verify. Use read mode for QA. Keep independent tasks free
+of prerequisites so the assignee can choose any of them.
+
+From a saved connection with steer permission, run
+`room plan --preview < plan.json` to validate the file and see its Work Thread
+IDs, then `room plan --submit < plan.json` to propose the batch.
+`room plan --help` shows the input shape. A steering connection that lists
+`room_propose_plan` can submit the same plan over MCP. If submission stops
+partway through or the outcome is uncertain, retry with the same file and
+connection. The recorded items keep their IDs and receipts.
+
+Recipients find their tasks in Room Next and accept and start them through the
+usual Work Thread actions. A proposal receipt confirms that a task was saved.
+Use the selected Work Thread to see its current status.
+
 ## Start or resume with Room next
 
 When a wake provides `data.nextRead`, call that read directly. A review wake
