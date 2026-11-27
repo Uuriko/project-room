@@ -551,7 +551,21 @@ for (const representation of [undefined, "normalized-current-v1"]) for (const in
     await capacityChange("resume", "provider-recovered");
     await setImmediate();
     assert.equal(latest("completion_pickup.refill"), "receiver_unconfirmed");
+    const coworkerRequest = buildReplyCommand({ roomId, memberId: "alternate" }, "room_request_reply", {
+      requestId: "coworker-private-work", toMemberId: recipientId, body: "A separate coworker request."
+    });
+    store.command(alternate.secret, roomId, coworkerRequest);
+    assert.ok(!store.replyRequests.list(owner, roomId, { direction: "outgoing", status: "open" })
+      .requests.some(item => item.id === coworkerRequest.data.messageId));
     await connect(primary.secret);
+    await setImmediate();
+    assert.equal(receipt("capacity-restored").status, "not_recorded", "receiver availability does not override another person's open work");
+    assert.equal(latest("completion_pickup.refill"), "pending_work");
+    const cancel = buildReplyCommand({ roomId, memberId: "alternate" }, "room_cancel_request", {
+      requestId: "coworker-work-withdrawn", requestMessageId: coworkerRequest.data.messageId,
+      expectedRequestRevision: 0, reason: "The coworker no longer needs this check."
+    });
+    store.command(alternate.secret, roomId, cancel);
     await setImmediate();
     assert.equal(receipt("capacity-restored").status, "recorded");
     assert.equal(receipt("capacity-alternate").eventId, fallbackEvent);

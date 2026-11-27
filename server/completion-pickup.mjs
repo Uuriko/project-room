@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { buildReplyCommand } from "../client/reply-actions.mjs";
 import { atomicPrivateJson, readPrivateJson } from "../room-acp/src/private-files.mjs";
 import { validId } from "../src/events.js";
+import { isCurrentRoom } from "./current-room-repository.mjs";
 import { listRoomWork } from "./mcp-room-profile.mjs";
 import { capacityHandoff, capacityWorkHandoff, compileCapacityHandoff, compileCapacityWork, compileIdleRefill, idleRefill, investigation } from "./completion-capacity.mjs";
 
@@ -31,20 +32,24 @@ function compileContinuation(route) {
   return { requests, position: 0 };
 }
 
-function recipientHasOpenRequest(store, secret, { roomId, recipientId }, includeStale = false) {
-  let cursor;
-  do {
-    const open = store.replyRequests.list(secret, roomId, { direction: "outgoing", status: "open", states: true,
-      ...(cursor ? { cursor } : {}),
-    });
-    // Staleness measures time since progress. An acknowledged request may
-    // still be executing, even when the receiver has stopped reporting.
-    if (open.requests.some(item => item.recipientId === recipientId &&
-        (includeStale || item.lifecycle?.state !== "stale" || item.lifecycle.unresponsive !== true))) return true;
-    if (!open.page?.hasMore) return false;
-    if (!open.page.nextCursor || open.page.nextCursor === cursor) return true;
-    cursor = open.page.nextCursor;
-  } while (cursor);
+// This dispatcher needs only a yes/no occupancy check across requesters.
+// A participant-visible reply list cannot answer it. Never return a private
+// request ID or body, or treat an overdue open request as settled.
+function recipientHasOpenRequest(store, { roomId, recipientId }) {
+  if (isCurrentRoom(store.db, roomId)) {
+    return Boolean(store.db.prepare(`
+      SELECT 1 FROM current_room_records INDEXED BY current_inbox_open_requests
+      WHERE room_id=? AND domain='replyRequests'
+        AND json_extract(payload,'$.status')='open' AND json_extract(payload,'$.recipientId')=?
+      LIMIT 1
+    `).get(roomId, recipientId));
+  }
+  return Boolean(store.db.prepare(`
+    SELECT 1 FROM rooms, json_each(rooms.projection,'$.replyRequests') AS request
+    WHERE rooms.id=? AND json_extract(request.value,'$.status')='open'
+      AND json_extract(request.value,'$.recipientId')=?
+    LIMIT 1
+  `).get(roomId, recipientId));
 }
 
 function advanceContinuation(store, { route, secret, continuation }, receiverServer) {
@@ -77,7 +82,7 @@ function advanceContinuation(store, { route, secret, continuation }, receiverSer
           || !receiverServer?.hasRecoveryReceiver({ roomId, recipientId, requesterId, workItemId,
             id: next.data.messageId }, decline.sequence, route.allowUnadvertisedReceiver === true)) return;
     }
-    if (recipientHasOpenRequest(store, secret, route)) return;
+    if (recipientHasOpenRequest(store, route)) return;
     try {
       const result = store.command(secret, roomId, next);
       continuation.position++;
@@ -107,12 +112,11 @@ export function dispatchCompletionPickup(store, route, secret, event, sequence) 
   const requestId = "investigate-" + createHash("sha256").update(roomId + "/" + event.id).digest("hex").slice(0, 32);
   if (store.operationReceipt(secret, roomId, requestId).status === "recorded") return "replayed";
   if (store.wakeQueue.pauseStatus(roomId, recipientId)) return "paused";
-  const requests = store.replyRequests.list(secret, roomId, { direction: "outgoing", status: "open", states: true });
-  if (requests.page?.hasMore || requests.requests.some(item => item.recipientId === recipientId
-      && item.workItemId === workItemId && item.lifecycle?.state !== "stale")) return "ready_or_unknown";
+  const checkedThrough = store.headSequence(roomId);
+  if (recipientHasOpenRequest(store, route)) return "ready_or_unknown";
   const offers = listRoomWork(store, secret, { roomId, focus: "help_wanted", limit: 1 });
   if (offers.selection?.available === false || offers.work.length || offers.page?.hasMore
-      || offers.evaluatedThrough !== requests.evaluatedThrough) return "ready_or_unknown";
+      || offers.evaluatedThrough !== checkedThrough) return "ready_or_unknown";
   const command = buildReplyCommand({ roomId, memberId: requesterId }, "room_request_reply", {
     requestId, workItemId, toMemberId: recipientId,
     body: [
@@ -152,7 +156,7 @@ function readCompletionPickupPlan(store, configPath) {
     bindings.set(routeKey(route), {
       route, secret, continuation: compileContinuation(route), capacity: compileCapacityHandoff(route),
       refill: compileIdleRefill(route), workHandoff: compileCapacityWork(route),
-      hasOpenRequest: selection => recipientHasOpenRequest(store, secret, selection, true)
+      hasOpenRequest: selection => recipientHasOpenRequest(store, selection)
     });
   }
   const configDigest = createHash("sha256").update(JSON.stringify(config)).digest("hex");
