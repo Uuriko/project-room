@@ -498,6 +498,8 @@ export default {
   "result.linkCopied": "Result link copied.",
   "result.copyLinkFailed": "Could not copy the result link. Try again.",
   "result.openEarlier": "Open earlier result",
+  "result.compareVersions": "Compare versions",
+  "result.loadingComparison": "Loading previous version…",
   "result.download": "Download",
   "result.copied": "Copied",
   "result.copyFailed": "Could not copy. Retry or download the text.",

@@ -182,6 +182,13 @@ for (const browserType of [chromium, webkit]) test(`a coworker can open the link
   assert.ok(reads.length > 0);
   assert.equal(new URL(reads[0]).searchParams.get("completionEventId"), result.event.id);
   assert.ok(reads.every(read => new URL(read).pathname === `/api/rooms/${destinationRoom}/work-result`));
+  const previousReads = () => reads.filter(read => new URL(read).searchParams.get("completionEventId") === first.event.id);
+  const comparison = page.locator("#result-diff .result-comparison");
+  assert.equal(await comparison.evaluate(detail => detail.open), false);
+  assert.equal(previousReads().length, 0, "cross-Room review opens only the current result");
+  await comparison.locator("summary").press("Enter");
+  await comparison.getByText("- Release owner missing", { exact: true }).waitFor();
+  assert.equal(previousReads().length, 1, "explicit comparison reads the previous pinned completion once");
   if (process.env.ROOM_CROSS_RESULT_CAPTURE) await page.screenshot({
     path: process.env.ROOM_CROSS_RESULT_CAPTURE + "-result-" + browserType.name() + ".png"
   });
@@ -255,6 +262,9 @@ for (const width of [1440, 390]) {
     await diff.waitFor({ state: "visible" });
     assert.match(await diff.innerText(), /Name the owner in the final line/);
     assert.doesNotMatch(await diff.innerText(), /Requested change:/);
+    assert.equal(await diff.locator(".result-diff").count(), 0);
+    await diff.locator("summary").press("Enter");
+    await diff.getByText("- Result A", { exact: true }).waitFor();
     assert.match(await diff.innerText(), /- Result A/);
     assert.match(await diff.innerText(), /\+ Result B/);
     assert.match(await diff.innerText(), /- Missing named owner/);
@@ -286,6 +296,7 @@ for (const width of [1440, 390]) {
     assert.equal(await owner.locator("#result-work-criteria").textContent(), "Name the owner");
     assert.equal(await owner.locator("#result-work-verification").textContent(), "Checked the named owner in result B");
     await owner.locator("#result-work-action").press("Enter");
+    await owner.locator("#action-result-diff summary").press("Enter");
     await owner.locator("#action-result-diff").getByText(/Resubmitted result/).waitFor();
     assert.match(await owner.locator("#action-text-body").textContent(), /Result B/);
     await owner.locator('#action-fields [name="decision"]').selectOption("approved");
@@ -306,6 +317,7 @@ for (const width of [1440, 390]) {
     // The comparison is a second, independent read of the previous version that
     // lands after #result-body; wait for its bytes instead of reading the box the
     // moment the current text appears (that race failed CI at both widths).
+    await reviewer.locator("#result-diff summary").press("Enter");
     await reviewer.locator("#result-diff").getByText(/- Result A/).waitFor();
     assert.match(await reviewer.locator("#result-diff").innerText(), /- Result A/);
     await reviewer.locator("#close-result").click();
@@ -359,6 +371,7 @@ test("a returning reviewer can finish the correction from the original link afte
   await returning.locator("#result-correction-summary").getByText("Put the owner beside the deadline.").waitFor();
   assert.equal(await returning.locator("#result-body").textContent(), "Result B\nOwner: Maya · Friday");
   await returning.locator("#result-work-action").click();
+  await returning.locator("#action-result-diff summary").press("Enter");
   await returning.locator("#action-result-diff").getByText("+ Owner: Maya · Friday", { exact: true }).waitFor();
   await review(returning, "pass", "Checked Maya against the Friday deadline.");
   assert.equal(f.item().verification.completionEventId, second.event.id);
@@ -374,12 +387,15 @@ test("a returning reviewer can finish the correction from the original link afte
   assert.equal(f.item().decision.decision, "approved");
 });
 
-test("late previous-result read cannot repopulate a different review after cancellation", { timeout: 30000 }, async t => {
+for (const withdraw of [false, true]) test(`late previous-result read respects ${withdraw ? "withdrawal" : "review cancellation"}`, { timeout: 30000 }, async t => {
   const f = await setup(t, 1440);
-  f.mutate(T.WORK_BLOCKED, { reason: "Correction", nextAction: "Revise" });
+  f.send("human-checker", T.VERIFICATION_RECORDED, { workItemId: f.item().id,
+    expectedRevision: f.item().revision, completionEventId: f.first.event.id, evidenceVersion: f.first.event.data.evidenceVersion,
+    result: "fail", summary: "Name the owner before approval." });
   f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Revised" });
   f.mutate(T.WORK_STARTED, {});
-  f.complete("Result B\nKeep this line\nOwner: Maya");
+  const revisedBody = "Result B\nKeep this line\nOwner: Maya";
+  const revised = f.complete(revisedBody);
   const page = await f.login("human-checker");
   let release, captured;
   const gate = new Promise(resolve => { release = resolve; });
@@ -391,7 +407,24 @@ test("late previous-result read cannot repopulate a different review after cance
     await route.fulfill({ response });
   });
   await clickWorkAction(await openWorkFromSearch(page, "revision-journey", "Revise a short result"), "verify");
+  const comparison = page.locator("#action-result-diff");
+  await comparison.getByText("Name the owner before approval.", { exact: false }).waitFor();
+  await comparison.locator("summary").press("Enter");
   await held;
+  if (withdraw) {
+    const messageId = f.first.event.data.evidenceMessageId;
+    const source = f.store.room("commons").state.messages.find(message => message.id === messageId);
+    f.send("producer", T.MESSAGE_DELETED, { messageId, expectedMessageRevision: source.revision ?? 0 });
+    await comparison.locator(".result-correction").waitFor({ state: "hidden" });
+    release();
+    await comparison.getByText("A version was withdrawn", { exact: false }).waitFor();
+    assert.equal(await comparison.getByRole("link").count(), 0);
+    assert.doesNotMatch(await comparison.textContent(), /Result A|Name the owner before approval/);
+    assert.equal(await page.locator("#action-text-body").textContent(), revisedBody);
+    await review(page, "pass", "Checked the owner on the current result.");
+    assert.equal(f.item().verification.completionEventId, revised.event.id);
+    return;
+  }
   await page.locator("#cancel-action").click();
   await clickWorkAction(await openWorkFromSearch(page, "calm-result", "A first result"), "verify");
   await page.locator("#action-text-body").getByText("Only version of this result", { exact: true }).waitFor();
@@ -620,6 +653,7 @@ test("shared result links keep identical old and new text bound to different ver
   const current = await sender.evaluate(() => window.sharedLink);
   const expected = completion => f.origin + "/?room=commons#pr-record/result/revision-journey/" + completion;
   assert.equal(current, expected(second.event.id));
+  await sender.locator("#result-diff summary").press("Enter");
   const earlier = await sender.getByRole("link", { name: "Open earlier result" }).getAttribute("href");
   assert.equal(earlier, expected(f.first.event.id));
 
