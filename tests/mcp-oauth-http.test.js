@@ -713,6 +713,17 @@ for (const normalized of [false, true]) test(`OAuth work:write lifecycle fits th
   const arrival = reviewed((await f.rpc('tools/call', { name: 'room_check_access', arguments: {} })).body);
   assert.equal(arrival.initialPickup.nextRead.arguments.workItemId, workItemId);
   assert.equal(arrival.initialPickup.viewerId, 'friend-dot');
+  f.store.dmConsents.request('commons', 'owner', 'friend-dot', 'Fixture scoped request');
+  f.store.dmConsents.decide('commons', 'friend-dot', 'owner', 'approve');
+  f.store.command(f.ownerKey, 'commons', { id: 'pending-before-reconnect', type: 'message.posted',
+    data: { messageId: 'pending-before-reconnect', toMemberId: 'friend-dot', requestKind: 'reply', body: 'Read later.' } });
+  const reconnect = reviewed((await f.rpc('tools/call', { name: 'room_check_access', arguments: {} })).body).initialPickup;
+  assert.equal(reconnect.nextRead.arguments.workItemId, workItemId);
+  assert.equal(reconnect.requests.items[0].id, 'pending-before-reconnect');
+  const ordinary = reviewed((await f.rpc('tools/call', { name: 'room_next', arguments: { view: 'pickup' } })).body);
+  assert.equal(ordinary.nextRead.arguments.requestMessageId, 'pending-before-reconnect');
+  f.store.command(f.ownerKey, 'commons', { id: 'cancel-reconnect-fixture', type: 'reply_request.cancelled',
+    data: { requestMessageId: 'pending-before-reconnect', expectedRequestRevision: 0, reason: 'End the reconnect fixture.' } });
   await call('room_accept_work', { expectedRevision: 0, requestId: 'life-accept' });
   await call('room_start_work', { expectedRevision: 1, requestId: 'life-start' });
   await call('room_block_work', { expectedRevision: 2, reason: 'Waiting on an input', nextAction: 'Owner supplies it', requestId: 'life-block' });
