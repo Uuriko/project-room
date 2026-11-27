@@ -256,12 +256,14 @@ function recentRoomResult(store, roomId) {
 
 // A bounded read suggests one check. Only a contributor's subsequent Room
 // message records a finding. Its key follows source evidence, never Room head.
-function investigationLead(store, roomId, charter, goal) {
+function investigationLead(store, roomId, charter, goal, allowPublicTaskRead) {
   const project = store.projectOffers.publishedProject(roomId);
   if (project) {
     const receipt = store.publicWorkClaims.latestPublicReceiptLead(roomId, project.repositoryUrl);
-    const publicLead = unrecordedInvestigation(store, roomId, charter, goal, { project, receipt });
-    if (publicLead) return publicLead;
+    if (!receipt || allowPublicTaskRead) {
+      const publicLead = unrecordedInvestigation(store, roomId, charter, goal, { project, receipt });
+      if (publicLead) return publicLead;
+    }
   }
   return unrecordedInvestigation(store, roomId, charter, goal, { result: recentRoomResult(store, roomId) });
 }
@@ -313,7 +315,7 @@ function unrecordedInvestigation(store, roomId, charter, goal, { project, receip
   };
 }
 
-export function readRoomNext(store, secret, roomId, { source, cursor, view, consideredDiscovery } = {}, readInvitation, { allowPublicReview = false, allowInvestigation = false, discoveryOrigin } = {}) {
+export function readRoomNext(store, secret, roomId, { source, cursor, view, consideredDiscovery } = {}, readInvitation, { allowPublicReview = false, allowInvestigation = false, allowPublicTaskRead = true, discoveryOrigin } = {}) {
   if (!validRoomNextSelection({ source, cursor, view, consideredDiscovery }))
     throw new ServiceError(422, "invalid_arguments", "Choose a source and its returned cursor");
   return store.readTransaction(() => {
@@ -435,7 +437,7 @@ export function readRoomNext(store, secret, roomId, { source, cursor, view, cons
         }
         if (canInvestigate && addressedComplete && !packet.nextRead && !packet.ifIdle?.discoveryReview &&
           (packet.ifIdle?.status === "no_invitation" || packet.ifIdle?.reason === "current_help_index_unavailable")) {
-          const lead = investigationLead(store, roomId, charter, packet.goal);
+          const lead = investigationLead(store, roomId, charter, packet.goal, allowPublicTaskRead);
           if (lead) {
             // Older clients validate top-level read names against a closed enum.
             // Its ifIdle extension is open and carries the exact action in full.
