@@ -179,7 +179,8 @@
     "scripts/work-reuse-browser-check.mjs": 16583,
     "scripts/work-search-browser-check.mjs": 7327,
     "scripts/workflow-browser-check.mjs": 14454,
-    "scripts/agent-entry-browser-check.mjs": 1838
+    "scripts/agent-entry-browser-check.mjs": 1838,
+    "scripts/workspace-chosen-version-check.mjs": 1592
   },
   "_note": " Agent entry measured on Mac Node24.22.1/Chromium on 2026-11-16: 1838ms total runner, one passing existing-member entry case. Local shard-balance estimate; replace with hosted timing when available."
 }

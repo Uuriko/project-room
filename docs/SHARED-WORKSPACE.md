@@ -55,9 +55,17 @@ In Changes, select a hunk before copying the link or adding it to the thread dra
 A saved review location stays tied to that patch. If the patch changes, use
 **Locate note in current patch** to see the nearest hunk and verify the location again.
 
-Use **Copy artifact link** on Preview, Changes, or Run output. Paste it into the relevant Room conversation for a teammate. The link names the selected artifact revision, publisher, and content digest. It only opens for someone with access to this room. If that revision is replaced, the viewer gets an explicit choice to open the current attempt. When Changes is open, the link selects the primary attempt’s current file.
+Use **Copy artifact link** on Preview, Changes, or Run output. Paste it into the relevant Room conversation for a teammate. The link names the selected artifact revision, publisher, and content digest. It only opens for someone with access to this room. If that revision is replaced, the viewer can open the current revision explicitly. When they opened the link from a Room reply, the original discussion stays reachable as long as the reply is still visible to them. When Changes is open, the link selects the primary attempt’s current file.
 Agents can pass that link to `room workspace changes --link URL` to read the
 exact file in one call.
+
+When comparing two attempts on the Changes tab, choose **Continue this version**
+in either column. Workspace reopens that exact publication. Enter an optional
+instruction for the selected version. From a source discussion, the sidebar
+shows recent public messages and links to the full discussion. **Add to thread
+draft** appends the instruction and artifact link for you to review and send.
+**Copy for agent** includes the instruction and a return pointer to the source
+discussion. Directed artifacts keep their original audience.
 
 To continue a teammate's attempt, use **Copy for agent** and paste the handoff
 into your coding agent. It includes the selected source link, expected commit

@@ -2603,6 +2603,7 @@ function renderTyping(typists) {
   el.hidden = false;
 }
 function renderMessages() {
+  workspacePreviewsUI?.refreshDiscussion();
   directWindow.select(activeDirectMemberId, client.generation);
   directWindow.pin(activeDirectMemberId ? currentThreadId : null);
   if (activeDirectMemberId) directWindow.sync(client.sequence);
@@ -3397,10 +3398,10 @@ function switchThread(threadId, focusComposer = false, preserveWork = false) {
 }
 // Capture the existing discussion when Workspace opens. A failed return must
 // leave the destination draft alone.
-function captureWorkspaceThreadDraft() {
+function captureWorkspaceThreadDraft(messageId) {
   const workId = activeWorkNavigationId, threadId = currentThreadId;
   const work = workId && state?.workItems[workId];
-  const sourceId = work ? work.sourceMessageId : threadId;
+  const sourceId = messageId ?? (work ? work.sourceMessageId : threadId);
   const root = conversation?.rootById.get(sourceId);
   const identity = session, context = workNavigationContext();
   function destination() {
@@ -3411,16 +3412,34 @@ function captureWorkspaceThreadDraft() {
     return state?.channels[channel] && !state.channels[channel].archivedAt ? channel : null;
   }
   if (!context || !destination()) return null;
-  return link => {
+  function stillSelected() {
+    return session === identity && workNavigationContext() === context && destination()
+      && (work ? activeWorkNavigationId === workId && state.workItems[workId]?.sourceMessageId === work.sourceMessageId
+        : currentThreadId === threadId);
+  }
+  function discussion() {
+    if (!stillSelected()) return null;
+    const url = new URL(location.pathname, location.origin);
+    url.searchParams.set("room", identity.roomId);
+    url.hash = recordHref("message", sourceId);
+    const thread = conversation.threads.get(root), messages = [];
+    for (let index = thread.length - 1; index >= 0 && messages.length < 4; index--) {
+      const message = thread[index];
+      if (message.toMemberId || message.deletedAt || message.redacted || typeof message.body !== "string"
+        || isMutedBy(state, identity.member.id, message.authorId)) continue;
+      const excerpt = clipGraphemes(message.body, 240);
+      messages.unshift({ author: name(message.authorId), excerpt: excerpt.length < message.body.length ? excerpt + "…" : excerpt });
+    }
+    return { link: url.href, messages };
+  }
+  function append(link, note) {
     const channel = destination();
-    if (!channel || session !== identity || workNavigationContext() !== context
-      || (work ? activeWorkNavigationId !== workId || state.workItems[workId]?.sourceMessageId !== sourceId
-        : currentThreadId !== threadId) || busy || requestReading
+    if (!stillSelected() || busy || requestReading
       || isRoomArchived(state) || composerFiles.some(file => file.status === "uploading")) return false;
     saveComposer();
     const draft = drafts.get(root);
     if (draft.pending || draft.toMemberId) return false;
-    const text = draft.body.split("\n").includes(link) ? draft.body : [draft.body, link].filter(Boolean).join("\n\n");
+    const text = [draft.body, note, draft.body.split("\n").includes(link) ? "" : link].filter(Boolean).join("\n\n");
     if (text.length > MAX_MESSAGE_BODY_CHARS) return false;
     updatesUi?.close(); closeResult(false);
     if (channel !== activeChannelId || activeDirectMemberId) setActiveChannel(channel);
@@ -3430,13 +3449,16 @@ function captureWorkspaceThreadDraft() {
     replyToId = draft.body || draft.files?.length ? (draft.replyToId ?? sourceId) : sourceId;
     updateReply(); syncRequestComposer(); autosizeComposer(); saveComposer();
     return true;
-  };
+  }
+  return { discussion, append };
 }
 function revealMessage(id) {
   if (state && !busy && !conversation.byId.has(id)) {
     activeWorkNavigationId = null; renderMessages(); pendHashReveal(id); return;
   }
   if (!state || busy || !conversation.byId.has(id)) return;
+  const blocked = roomDestinationBlockedReason();
+  if (blocked) { notice(blocked, true); return; }
   activeWorkNavigationId = null;
   if ($("#settings-dialog")?.open) $("#settings-dialog").close();
   if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
@@ -3463,6 +3485,7 @@ function revealMessage(id) {
   // Scroll first: content-visibility: auto skips off-screen rows, and focusing
   // a skipped row is a no-op. Scrolling makes it relevant (rendered), so the
   // subsequent focus lands.
+  if (row) updatesUi?.close();
   row?.scrollIntoView({ block: "nearest", behavior: "instant" });
   row?.focus({ preventScroll: true });
   // Nearest can leave a tall message clipped at its bottom. Align its beginning
@@ -5019,6 +5042,19 @@ function expandTimelineTo(id) {
   }
 }
 $("#message-list").addEventListener("click", e => {
+  const artifact = e.target.closest(".message-body a[href]");
+  if (artifact && !e.defaultPrevented && e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+    const url = new URL(artifact.href);
+    const messageId = artifact.closest("[data-message-record-id]")?.dataset.messageRecordId;
+    if (messageId && url.origin === location.origin && url.pathname === location.pathname
+      && url.searchParams.get("room") === session?.roomId && url.hash.startsWith("#pr-workspace/")) {
+      const destination = captureWorkspaceThreadDraft(messageId);
+      if (destination && workspacePreviewsUI?.openLink(url.hash, destination)) {
+        e.preventDefault();
+        return;
+      }
+    }
+  }
   if (e.target.closest("[data-direct-retry]")) { void directWindow.retry(); return; }
   if (e.target.closest("[data-timeline-earlier]")) {
     if (activeDirectMemberId) {
