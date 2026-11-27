@@ -1,18 +1,63 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createResultComparison } from "../src/result-comparison.js";
+import "../src/vendor-jsdiff-patch.js";
 
 function fixture() {
   const pending = [], state = { messages: [] };
-  const box = { hidden: true, innerHTML: "", textContent: "", insertAdjacentHTML(_position, html) { this.innerHTML = html + this.innerHTML; }, querySelector() { return {remove: () => { this.innerHTML = this.innerHTML.replace(/^<p data-previous-release-checks.*?<\/p>/, ""); }}; }, replaceChildren() { this.innerHTML = ""; this.textContent = ""; } };
+  const box = {
+    hidden: true,
+    ownerDocument: { createElement: () => ({
+      innerHTML: "", textContent: "", children: [], open: false,
+      append(...children) { this.children.push(...children); },
+      replaceChildren(...children) {
+        this.children = children;
+        this.textContent = "";
+        this.innerHTML = "";
+      },
+      setAttribute() {},
+      addEventListener(type, handler) { if (type === "toggle") this.toggle = handler; },
+      insertAdjacentHTML(_position, html) { this.innerHTML = html + this.innerHTML; },
+    }) },
+    disclosure: null,
+    get content() { return this.disclosure?.children[1]; },
+    message: "",
+    get innerHTML() { return this.content?.textContent ? "" : this.content?.innerHTML ?? ""; },
+    get textContent() { return this.content?.textContent || this.message; },
+    set textContent(text) { this.disclosure = null; this.message = text; },
+    append(disclosure) { this.disclosure = disclosure; },
+    replaceChildren() { this.disclosure = null; this.message = ""; },
+    querySelector(selector) {
+      if (selector !== "[data-previous-release-checks]" || !this.content) return null;
+      return { remove: () => {
+        this.content.innerHTML = this.content.innerHTML.replace(/^<p data-previous-release-checks.*?<\/p>/, "");
+      } };
+    },
+  };
   const controller = createResultComparison({ getState: () => state,
     client: { workResult: () => new Promise(resolve => pending.push(resolve)) },
     esc: text => String(text).replaceAll("<", "&lt;").replaceAll(">", "&gt;") });
   const respond = (index, body = "old") => pending[index]({ result: { receipt: { eventId: "previous" }, text: { messageId: "old-message", body } } });
-  const load = (body = "new") => controller.load("work", "previous", { messageId: "current", body }, box, () => true);
-  return { controller, state, box, respond, load, pending };
+  const open = () => {
+    box.disclosure.open = true;
+    void box.disclosure.toggle();
+  };
+  const load = (body = "new", compare = true) => {
+    controller.load("work", "previous", { messageId: "current", body }, box, () => true);
+    if (compare) open();
+  };
+  return { controller, state, box, respond, load, open, pending };
 }
 const settle = () => new Promise(resolve => setImmediate(resolve));
+
+test("the closed comparison leaves the earlier result unread", async () => {
+  const f = fixture(); f.load("revised", false);
+  assert.equal(f.pending.length, 0);
+  f.open(); f.open();
+  assert.equal(f.pending.length, 1);
+  f.respond(0); await settle();
+  assert.match(f.box.innerHTML, /revised/);
+});
 
 test("cleared or replaced comparisons ignore late reads", async () => {
   const f = fixture(); f.load(); f.controller.clear(f.box); f.respond(0); await settle();
