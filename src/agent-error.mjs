@@ -36,7 +36,14 @@ const BOND_DM_DATA_SHAPES = {
 // New codes must be born here (registry-born ratchet); the remaining estate
 // migrates surface by surface under the tracking issue filed with this PR.
 // ---------------------------------------------------------------------------
+const staticReviewRecovery = "Read the existing review binding and use its review flow.";
+
 export const ERROR_REGISTRY = {
+  static_review_binding: {
+    status: "action_required", hint: "This PR already uses the Room's static review lane.",
+    next: [command(staticReviewRecovery)],
+    catalog: { http: 409, retry: "no", recovery: staticReviewRecovery }
+  },
   review_runtime_stale: {
     status: "action_required", hint: uiText("agentError.review_runtime_stale.hint"),
     next: [{ command: uiText("agentError.review_runtime_stale.recovery") }],
