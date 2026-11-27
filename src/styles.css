@@ -38,7 +38,6 @@
    (default) theme, but their text follows the theme tokens — without these
    overrides the text is unreadable in light theme (measured 1.01–2.63:1).
    Dark theme rendering is untouched. */
-:root[data-theme="light"] .thread-bar,
 :root[data-theme="light"] .search-results,
 :root[data-theme="light"] .invitation-details,
 :root[data-theme="light"] .new-work-form,
@@ -150,7 +149,7 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 }
 .message.mentioned { border-radius: .4rem; background: rgb(173 140 255 / 10%); }
 .chat-divider { grid-column: 1 / -1; margin: .55rem 0 .2rem; color: var(--muted); font-size: .68rem; font-weight: 700; letter-spacing: .06em; text-align: center; text-transform: uppercase; }
-.chat-divider.unread { color: var(--amber); }
+.chat-divider.unread { color: var(--blue); }
 .message-avatar { display: grid; place-items: center; width: 2rem; height: 2rem; border-radius: 50%; background: #3d465f; color: white; font-size: .65rem; font-weight: 650; }
 .message-avatar.agent { border-radius: .45rem; background: #3a2c57; color: #e7ddff; }
 .message-content { min-width: 0; }
@@ -337,6 +336,11 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
    The room scrolls to its composer instead of squeezing the timeline away. */
 .timeline { flex: 1 1 auto; min-height: 10rem; overflow-y: auto; margin: 0; padding: .75rem 1.5rem 1rem; list-style: none; scrollbar-gutter: stable; }
 .timeline > .empty-note { color: var(--muted); }
+@media (min-width: 1181px) {
+  .room-main > :is(.timeline, .composer, .chat-suggestions) {
+    padding-inline: max(var(--space-5), calc((100% - 58rem) / 2));
+  }
+}
 .tl-work { margin: .6rem 0; }
 .conversation-work { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: .35rem; max-width: 100%; }
 .conversation-work-summary { flex-basis: 100%; color: var(--muted); overflow-wrap: anywhere; }
@@ -353,7 +357,7 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .typing-indicator[hidden] { display: none; }
 .composer-row { display: grid; grid-template-columns: 36px minmax(0, 1fr) 36px 44px; align-items: end; gap: .5rem; padding: .5rem; border: 1px solid var(--line-control); border-radius: .75rem; background: var(--panel-raised); }
 .composer-row:focus-within { border-color: var(--blue); }
-.composer-row textarea { grid-column: 2; min-height: 3rem; max-height: 25dvh; border: 0; border-radius: .35rem; background: transparent; padding: .45rem .25rem; }
+.composer-row textarea { grid-column: 2; min-height: 2.5rem; max-height: 25dvh; border: 0; border-radius: .35rem; background: transparent; padding: .45rem .25rem; }
 .composer-row textarea:focus { outline: 0; }
 .composer-row #request-reply { grid-column: 2; grid-row: 2; justify-self: end; align-self: center; min-height: 32px; padding: .2rem .55rem; font-size: .75rem; white-space: nowrap; }
 .composer-attach { grid-column: 3; grid-row: 1 / span 2; align-self: end; }
@@ -746,9 +750,10 @@ button, .button, .message-to-work { min-height: 44px; }
 .search-results a:hover { background: #1a2940; }
 .search-results a span { color: var(--text); white-space: pre-wrap; }
 .search-results a small { color: var(--muted); }
-.thread-bar { display: flex; gap: 1rem; align-items: center; padding: .75rem 1rem; border-bottom: 1px solid #374463; background: #171c2a; }
+.thread-bar { display: flex; flex: 1; min-width: 0; align-items: center; gap: var(--space-2); }
+.room-topbar:has(> .thread-bar:not([hidden])) > .conversation-heading { display: none; }
 .thread-bar > div { min-width: 0; }
-.thread-bar h3 { margin: 0 0 .3rem; overflow-wrap: anywhere; }
+.thread-bar h3 { margin: 0; overflow-wrap: anywhere; font-size: var(--text-md); }
 .thread-bar p { margin: 0; color: var(--muted); font-size: var(--text-sm); }
 .thread-bar button { flex-shrink: 0; }
 .message-list { scroll-behavior: auto; overflow-anchor: none; }
@@ -768,7 +773,7 @@ button:disabled { cursor: wait; opacity: .6; }
 .count-chip { padding-inline: .6rem; white-space: nowrap; }
 @media (max-width: 500px) {
   /* One row: Back, the title and Mute, so a thread keeps room for its replies. */
-  .thread-bar { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: .5rem; padding: .4rem .75rem; }
+  .thread-bar { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; }
   .thread-bar h3 { margin: 0; font-size: var(--text-md); }
   .thread-bar p { font-size: var(--text-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .thread-bar button { min-height: 44px; padding-inline: .6rem; }
@@ -1471,10 +1476,16 @@ summary { overflow-wrap: anywhere; }
 }
 .sidebar-head .room-overview-open > span:last-child { flex: none; font-size: var(--text-md); font-weight: 400; color: var(--muted); }
 @media (max-width: 520px) {
-  /* Keep each action intact. Catch-up uses the remaining room; enlarged text
-     reflows whole controls rather than squeezing More into stacked letters. */
-  .room-topbar { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: .25rem .5rem; }
-  .room-topbar .topbar-actions { position: relative; display: flex; flex-wrap: wrap; grid-column: 1 / -1; justify-content: flex-end; width: 100%; gap: .25rem; }
+  /* A single row at normal text size, with room for larger controls to wrap. */
+  .room-topbar { position: relative; flex-wrap: wrap; gap: var(--space-1); padding-inline: var(--space-2); }
+  .room-topbar .topbar-actions { flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; max-width: 100%; gap: 0; }
+  .room-topbar .conversation-heading { flex-basis: 4.25rem; }
+  .room-topbar #mobile-room-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .room-topbar:has(> .thread-bar:not([hidden])) > #sidebar-toggle,
+  .room-topbar:has(> .thread-bar:not([hidden])) .topbar-actions > :not(#topbar-updates) { display: none; }
+  .room-topbar .thread-bar { flex-basis: 12rem; }
+  .thread-bar .button.ghost { border-color: transparent; }
+  .composer-hint { display: none; }
   .room-topbar .topbar-actions > * { flex: none; }
   .room-topbar .icon-button { width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
   .room-topbar .topbar-actions > .topbar-button, .room-topbar .room-more > summary { min-width: 44px; min-height: 44px; padding-inline: .2rem; white-space: nowrap; overflow-wrap: normal; }
@@ -1482,9 +1493,10 @@ summary { overflow-wrap: anywhere; }
   .room-topbar #topbar-catchup { display: flex; flex: 1 1 4rem; flex-wrap: wrap; gap: .1rem .4rem; min-width: min-content; justify-content: center; }
   .room-topbar .count-chip { min-width: 0; font-size: .7rem; }
   #catchup-count { max-width: 100%; padding-inline: 0; white-space: normal; overflow-wrap: normal; text-align: center; border: 0; }
-  /* A wrapped trigger may be on the left. Anchor its popover to the full row. */
+  /* Anchor narrow-screen popovers to the header edge. */
   .room-topbar .room-more, .room-topbar .session-menu { position: static; }
   .room-topbar .session-menu-panel { min-width: 0; }
+  .room-topbar :is(.room-more-actions, .session-menu-panel) { right: var(--space-2); }
   .room-topbar .room-more-actions .topbar-button { white-space: normal; }
   /* Recovery text gets a full line before its controls. Limit this to an
      interrupted active room; signed-out, inbox and healthy bars stay as-is. */
@@ -1875,7 +1887,6 @@ svg[width="20"][height="20"] { width: 1.25rem; height: 1.25rem; }
 .composer-row > button[type="submit"] { min-width: max(44px, 2.75rem); min-height: max(44px, 2.75rem); }
 @media (pointer: coarse) { .icon-button { width: max(44px, 2.75rem); height: max(44px, 2.75rem); min-width: max(44px, 2.75rem); min-height: max(44px, 2.75rem); } }
 @media (max-width: 520px) {
-  .room-topbar { grid-template-columns: max(44px, 2.75rem) minmax(0, 1fr); }
   .room-topbar .icon-button { width: max(44px, 2.75rem); height: max(44px, 2.75rem); min-width: max(44px, 2.75rem); min-height: max(44px, 2.75rem); }
   .composer-row > button[type="submit"] { flex-basis: max(44px, 2.75rem); }
 }
@@ -1905,8 +1916,8 @@ svg[width="20"][height="20"] { width: 1.25rem; height: 1.25rem; }
 }
 
 /* Work and attention are reading surfaces in the room shell. */
-.room-main:has(> #updates-dialog:not([hidden])) > :is(.timeline, .composer, .thread-bar, .reply-bar, .chat-suggestions, .typing-indicator, .pinned-panel, .new-messages-button, #work-navigation-return),
-.room-main:has(> .result-focused:not([hidden])) > :is(.timeline, .composer, .thread-bar, .reply-bar, .chat-suggestions, .typing-indicator, .pinned-panel, .new-messages-button) { display: none; }
+.room-main:has(> #updates-dialog:not([hidden])) > :is(.timeline, .composer, .reply-bar, .chat-suggestions, .typing-indicator, .pinned-panel, .new-messages-button, #work-navigation-return),
+.room-main:has(> .result-focused:not([hidden])) > :is(.timeline, .composer, .reply-bar, .chat-suggestions, .typing-indicator, .pinned-panel, .new-messages-button) { display: none; }
 .room-main:has(> #updates-dialog:not([hidden])) .conversation-title-row,
 .room-main:has(> .result-focused:not([hidden])) .conversation-title-row { visibility: hidden; }
 #updates-dialog:not([hidden]), .room-main > .result-focused:not([hidden]) {
@@ -1971,11 +1982,6 @@ svg[width="20"][height="20"] { width: 1.25rem; height: 1.25rem; }
 [data-workspace-discussion] { overflow-wrap: anywhere; }
 [data-workspace-note] textarea { display: block; width: 100%; box-sizing: border-box; }
 .workspace-open svg { display: none; }
-@media (max-width: 520px) {
-  .room-topbar .workspace-open { width: 44px; display: inline-grid; place-items: center; }
-  .workspace-open span { display: none; }
-  .workspace-open svg { display: block; pointer-events: none; }
-}
 .workspace-preview-detail h3 { margin-block: 0 .35rem; }
 .workspace-preview-detail iframe { display: block; width: 100%; height: min(65vh, 750px); border: 1px solid var(--line); border-radius: .5rem; background: white; }
 .workspace-preview-detail iframe[hidden] { display: none; }

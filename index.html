@@ -194,7 +194,7 @@
             <ol id="direct-message-list" class="channel-list"></ol>
           </nav>
           <nav id="tasks-destination" aria-label="Tasks">
-            <p class="sidebar-label"><span>Tasks</span></p>
+            <p class="sidebar-label"><span>Work</span></p>
             <button id="tasks-board-open" type="button">Board</button>
             <button id="new-work-open" type="button">New work</button>
           </nav>
@@ -224,6 +224,11 @@
           <header class="room-topbar">
             <button id="sidebar-toggle" class="icon-button" type="button" aria-label="Menu" aria-expanded="false" title="Menu"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
             <div class="conversation-heading"><span id="mobile-room-name"></span><div class="conversation-title-row"><h2 id="conversation-title" tabindex="-1"># general</h2></div></div>
+            <div id="thread-bar" class="thread-bar" hidden>
+              <button id="thread-back" class="button ghost" type="button">&larr; Back</button>
+              <div><h3 id="thread-title" tabindex="-1"></h3><p id="thread-context"></p></div>
+              <button id="thread-mute" class="button ghost" type="button" aria-pressed="false">Mute thread</button>
+            </div>
             <div class="topbar-actions">
               <button id="topbar-search-toggle" class="icon-button" type="button" aria-expanded="false" aria-controls="search-form" aria-label="Search" title="Search"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></button>
               <button id="topbar-catchup" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="catchup-dialog">Catch up <span id="catchup-count" class="sr-only"></span></button>
@@ -258,11 +263,6 @@
             <ol id="search-list"></ol>
             <div id="results-panel" hidden><ol id="room-results-list" tabindex="-1" class="results-list" aria-label="Completed work results"></ol></div>
           </section>
-          <div id="thread-bar" class="thread-bar" hidden>
-            <button id="thread-back" class="button ghost" type="button">&larr; Back</button>
-            <div><h3 id="thread-title" tabindex="-1"></h3><p id="thread-context"></p></div>
-            <button id="thread-mute" class="button ghost" type="button" aria-pressed="false">Mute thread</button>
-          </div>
           <p id="conversation-announcement" class="sr-only" role="status" aria-live="polite"></p>
           <p id="work-announcement" class="sr-only" role="status" aria-live="polite"></p>
           <details id="pinned-panel" class="pinned-panel" hidden>
@@ -298,7 +298,7 @@
                   <button id="composer-attach" class="icon-button composer-attach" type="button" aria-label="Attach a file" title="Attach a file"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg><span>Attach a file</span></button>
                 </div>
               </details>
-              <textarea id="message-input" rows="2" aria-describedby="message-length-status composer-hint" placeholder="Message #general" title="Enter to send · Shift + Enter for a new line" aria-description="Enter to send · Shift + Enter for a new line" aria-controls="mention-list" aria-autocomplete="list" aria-haspopup="listbox" required></textarea>
+              <textarea id="message-input" rows="1" aria-describedby="message-length-status composer-hint" placeholder="Message #general" title="Enter to send · Shift + Enter for a new line" aria-description="Enter to send · Shift + Enter for a new line" aria-controls="mention-list" aria-autocomplete="list" aria-haspopup="listbox" required></textarea>
               <input id="composer-file" type="file" hidden multiple tabindex="-1">
               <button class="button primary icon-button" type="submit" aria-label="Send" title="Send"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button>
             </div>

@@ -866,7 +866,7 @@ updatesUi = mountUpdates({ client, host: document.querySelector(".room-main"), g
   onOpenWork: (id, origin) => navigateWorkRecord("work", id, { type: "updates", updates: origin, presentation: "thread" }),
   onOpenMessage: (id, origin) => navigateWorkRecord("message", id, { type: "updates", updates: origin }) });
 // JDOT-COH-NAV end
-workspacePreviewsUI = installWorkspacePreviews({ client, toolbar: document.querySelector(".room-main .topbar-actions"),
+workspacePreviewsUI = installWorkspacePreviews({ client, toolbar: $(".room-more-actions"),
   memberLabel: id => state?.members[id]?.displayName, captureThreadDraft: captureWorkspaceThreadDraft,
   workThread: () => {
     if (!session || !state?.workItems[activeWorkNavigationId]) return null;
@@ -2558,8 +2558,9 @@ function syncChatSuggestions() {
   // "Ask @Agent" is for the channel view: a thread already has its own replies.
   const ask = latest && !currentThreadId
     ? { members: state.members, replyCount: (conversation.threads.get(latest.id)?.length ?? 1) - 1, now: Date.now() } : null;
-  const offer = latest && !isRoomArchived(state) && !activeChannel()?.archivedAt
+  const suggested = latest && !isRoomArchived(state) && !activeChannel()?.archivedAt
     ? chatSuggestions(latest, { viewerId: session.member.id, canCreateWork: can("steer"), dismissed: dismissedSuggestions, ask }) : null;
+  const offer = suggested?.task || suggested?.agent ? suggested : null;
   // A question can cross the wait while nothing else changes, so check again then.
   clearTimeout(askAgentTimer);
   const waitLeft = ask && !offer?.agent ? Date.parse(latest.createdAt) + ASK_AGENT_AFTER_MS - ask.now : NaN;
@@ -2569,13 +2570,12 @@ function syncChatSuggestions() {
   box.dataset.signature = signature;
   box.hidden = !offer;
   if (!offer) { box.replaceChildren(); return; }
-  box.innerHTML = offer.choices.map(choice => `<button type="button" class="suggestion-chip" data-suggest-reply="${esc(choice)}">${esc(choice)}</button>`).join("")
-    + (offer.task ? `<button type="button" class="suggestion-chip suggestion-task" data-suggest-task="${esc(offer.messageId)}">Make this a task</button>` : "")
+  box.innerHTML = (offer.task ? `<button type="button" class="suggestion-chip suggestion-task" data-suggest-task="${esc(offer.messageId)}">Make this a task</button>` : "")
     + (offer.agent ? `<button type="button" class="suggestion-chip suggestion-agent" data-suggest-agent="${esc(offer.agent.name)}" data-suggest-agent-for="${esc(offer.messageId)}">Ask @${esc(offer.agent.name)}</button>` : "")
     + `<button type="button" class="suggestion-dismiss" data-suggest-dismiss="${esc(offer.messageId)}" aria-label="Hide suggestions" title="Hide">×</button>`;
 }
 $("#chat-suggestions")?.addEventListener("click", e => {
-  const reply = e.target.closest("[data-suggest-reply]"), task = e.target.closest("[data-suggest-task]"), dismiss = e.target.closest("[data-suggest-dismiss]");
+  const task = e.target.closest("[data-suggest-task]"), dismiss = e.target.closest("[data-suggest-dismiss]");
   if (dismiss) { dismissedSuggestions.add(dismiss.dataset.suggestDismiss); syncChatSuggestions(); $("#message-input").focus(); return; }
   if (task) { dismissedSuggestions.add(task.dataset.suggestTask); syncChatSuggestions(); openWork(task.dataset.suggestTask); return; }
   const agent = e.target.closest("[data-suggest-agent]");
@@ -2585,15 +2585,7 @@ $("#chat-suggestions")?.addEventListener("click", e => {
     if (!input.value.trim()) { input.value = `@${agent.dataset.suggestAgent} `; input.dispatchEvent(new Event("input", { bubbles: true })); }
     dismissedSuggestions.add(agent.dataset.suggestAgentFor); syncChatSuggestions();
     input.focus(); input.setSelectionRange(input.value.length, input.value.length);
-    return;
   }
-  if (!reply || busy || !state) return;
-  const input = $("#message-input");
-  // A chip only fills a message the person hasn't started, then sends it
-  // through the normal composer (same retry and ownership rules).
-  if (input.value.trim()) { input.focus(); return; }
-  input.value = reply.dataset.suggestReply;
-  $("#message-form").requestSubmit();
 });
 // Typing indicators: ephemeral, driven by synthetic `typing` SSE events.
 // The server expires beats after 10s, so a missing update clears itself;
@@ -2683,6 +2675,9 @@ function renderMessages() {
   newMessages.forEach(message => locallyOwnedMessageIds.delete(message.id));
   if (arrivalsNeedFileRefresh(newMessages, session?.member?.id)) scheduleRoomFilesRefresh();
   $("#thread-bar").hidden = !currentThreadId;
+  const heading = currentThreadId ? "thread-title" : "conversation-title";
+  $(".room-main").setAttribute("aria-labelledby", heading);
+  $("#skip-link").setAttribute("href", "#" + heading);
   syncThreadMuteButton();
   syncAlsoSend();
   syncComposerAudienceLabel();

@@ -99,9 +99,9 @@ async function assertHeader(page, count) {
     const sharedBand = Math.min(...actions.map(box => box.y + box.height)) - Math.max(...actions.map(box => box.y));
     assert.ok(sharedBand >= Math.min(...actions.map(box => box.height)) * .75, `default-size actions share one compact row (shared ${sharedBand}px): ${JSON.stringify(actions)}`);
   }
-  const workspace = page.getByRole("button", { name: "Workspace", exact: true });
-  const workspaceBox = await workspace.boundingBox();
-  assert.ok(workspaceBox?.width >= 44 && workspaceBox.height >= 44, "Workspace retains a labeled 44px target");
+  const workspace = page.locator(".room-more-actions .workspace-open");
+  assert.equal(await workspace.count(), 1, "secondary Workspace action is retained in More");
+  assert.equal(await workspace.isVisible(), false, "Workspace stays out of the default header");
   // Compare geometry before scrolling, then test each target's actual hit
   // area. Enlarged text may need vertical scrolling; it must remain usable.
   for (const selector of headerControls) {
@@ -139,6 +139,9 @@ async function exerciseHeader(page) {
     await activate("#topbar-search-toggle");
     assert.equal(await page.locator("#message-search").isVisible(), true);
     await activate("#topbar-search-toggle");
+    await activate("#room-more > summary");
+    const workspaceBox = await page.locator(".workspace-open").boundingBox();
+    assert.ok(workspaceBox?.width >= 44 && workspaceBox.height >= 44, "Workspace retains a labeled 44px target");
     await activate(".workspace-open");
     await page.getByRole("dialog", { name: "Workspace" }).waitFor();
     await page.keyboard.press("Escape");
@@ -148,7 +151,7 @@ async function exerciseHeader(page) {
     const menu = await page.locator(".room-more-actions").boundingBox();
     assert.ok(menu.x >= 0 && menu.x + menu.width <= page.viewportSize().width + 1, "More popover stays inside the narrow viewport");
     if (mode === "keyboard") {
-      for (const selector of ["#topbar-later", "#room-actions-open", "#topbar-settings"]) {
+      for (const selector of [".workspace-open", "#topbar-later", "#room-actions-open", "#topbar-settings"]) {
         await page.keyboard.press("Tab");
         assert.equal(await page.locator(selector).evaluate(node => node === document.activeElement), true, `More menu Tab reaches ${selector}`);
       }
