@@ -25,7 +25,7 @@ async function previewCli(origin, token, input) {
 for (const representation of ["legacy", "normalized-current-v1"]) {
   test(`read-only requester preflight uses the active receiver stream (${representation})`, async t => {
     const openedAt = Date.now();
-    let clock = openedAt;
+    let clock = openedAt, elapsed = 0;
     const store = new RoomStore(":memory:", { now: () => clock });
     const options = representation === "legacy" ? {} : { representation };
     store.initialize(initialRoom(), options);
@@ -48,7 +48,7 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
       messageId: "private-source", toMemberId: "receiver", workItemId: "private-work", requestKind: "reply", body: "Private fixture",
     });
     const sequence = store.headSequence("commons");
-    const server = createRoomServer({ store });
+    const server = createRoomServer({ store, receiverElapsedNow: () => elapsed });
     server.listen(0, "127.0.0.1");
     await once(server, "listening");
     t.after(async () => {
@@ -109,6 +109,7 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     const exact = { roomId: "commons", requesterId: "owner", recipientId: "receiver", workItemId: "approved-work", id: null };
     const ready = () => server.hasRecoveryReceiver(exact, sequence, false);
     clock = openedAt + 23_999;
+    elapsed = 23_999;
     assert.equal((await preview(owner)).receiver?.state, "waiting_for_work");
     assert.equal(ready(), true);
     clock = openedAt + 24_000;
@@ -123,15 +124,25 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     assert.equal(ready(), false, "an expired advertisement cannot revive after a clock correction");
 
     clock = openedAt + 24_000;
+    elapsed = 24_000;
     const renewed = await open(keys.receiver, advertised, true);
     assert.equal(renewed.status, 200);
     assert.equal((await preview(owner)).receiver?.since, new Date(clock).toISOString());
     assert.equal(ready(), true, "a fresh matching stream restores readiness");
+    clock = openedAt + 24_001;
+    elapsed = 48_000;
+    assert.equal((await preview(owner)).receiver, undefined);
+    assert.equal(ready(), false, "elapsed time expires a receiver before any wall-clock expiry was observed");
+
+    const refreshed = await open(keys.receiver, advertised, true);
+    assert.equal(refreshed.status, 200);
+    assert.equal(ready(), true);
     clock = openedAt - 1;
     assert.equal((await preview(owner)).receiver, undefined);
     assert.equal(ready(), false, "a clock rollback cannot revive readiness");
     server.closeStreams();
     await renewed.body.cancel();
+    await refreshed.body.cancel();
     await waiting;
     const closed = await preview(owner);
     assert.equal(closed.status, "unknown");

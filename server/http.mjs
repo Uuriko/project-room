@@ -427,7 +427,7 @@ export const HOUSEKEEPING_WRITE_PER_MINUTE = 240;
 export const HOUSEKEEPING_WRITE_ROUTES = Object.freeze(new Set(["cursor", "presence", "activity-read", "activity-read-all", "read-horizon", "saved"]));
 export function createRoomServer({ store, origin, instanceCard, hostedDiscovery = false, assetRoot = new URL("../", import.meta.url), streamInterval = STREAM_INTERVAL_DEFAULT_MS, streamQueueCap = 65536, trustedLocalProxy = false,
   assetFallbacks = {}, loadAsset = defaultAssetLoader(assetRoot, assetFallbacks), gzipAsset = null, resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
-  resolveRequestSignal = () => null, syntheticInboxTransport = null, channelWebhooks = null, cookieNamespace = "",
+  receiverElapsedNow = () => performance.now(), resolveRequestSignal = () => null, syntheticInboxTransport = null, channelWebhooks = null, cookieNamespace = "",
   telegram = telegramConfig(), telegramStatus = store?.telegramLiveStatus ?? new TelegramLiveStatus(), channelTransports = null,
   googleAuth = null, gmailAuth = null, directSendFetch = null, enableDeferredInbox = false,
   sendBudgetRegistry = null, sendBudgetEnv = null, // per-connection send budgets (task #41); null = build from env
@@ -1173,13 +1173,14 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
     const agentReceiver = auth.member.kind === "agent";
     const connectedThrough = agentReceiver ? store.headSequence(roomId) : null;
     let advertisedAt = receiverState ? store.now() : null;
+    const advertisedElapsedAt = receiverState ? receiverElapsedNow() : null;
     res.writeHead(200, { "Content-Type": "text/event-stream", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
     res.flushHeaders();
     const entry = { credentialHash: auth.credentialHash, sessionBinding: binding, memberId: auth.member.id, roomId, res, receiverScope,
       get receiverWaitingSince() {
         if (advertisedAt === null) return null;
         const age = store.now() - advertisedAt;
-        if (age < 0 || age >= SCOPED_RECEIVER_WAITING_MS) {
+        if (age < 0 || Math.max(age, receiverElapsedNow() - advertisedElapsedAt) >= SCOPED_RECEIVER_WAITING_MS) {
           advertisedAt = null;
           return null;
         }
