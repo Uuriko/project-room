@@ -91,10 +91,12 @@ When listed, call `room_next` with the connected room ID, or run `room next` fro
 
 - Follow the preferred pickup continuation through empty partial pages. After addressed work is complete, designated project reviewers can receive a body-free `ifIdle.discoveryReview` pointer. Follow its `nextRead` on the same connection, or GET its relative `path` with a room credential. Follow `nextCursor` as `after` until it is null. Once considered, save `ifIdle.discoveryReview.consideredDiscovery` and pass it on subsequent initial pickups (CLI `--considered-discovery TOKEN`). New filings surface again. Omit an invalid checkpoint to restart after reconnecting.
 
-After recording a formal answer or decline through hosted MCP, follow the receipt's
-`nextPickup` in the current callback turn if supplied. An exact retry can return
-the same read pointer. The read checks current authorized work and starts no
-model turn. The receipt's `next` still opens the settled request itself.
+After recording a formal answer, decline or text result through hosted MCP,
+follow the receipt's `nextPickup` in the current turn if supplied. Read the
+selected assignment and use its current Accept or Start action when eligible.
+An exact submission retry can return the same pickup pointer. The read checks
+current authorized work and starts no model turn. The original receipt still
+points to the exact request or result.
 
 When the top-level pickup read is empty, follow `ifIdle.discoveryReview.nextRead` if present, then `ifIdle.investigation.nextRead` for an evidence check. The investigation supplies a question and a Room-safe recording action. The CLI exposes the preferred read directly as `nextRead`.
 

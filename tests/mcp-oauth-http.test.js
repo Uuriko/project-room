@@ -703,8 +703,8 @@ for (const normalized of [false, true]) test(`OAuth work:write lifecycle fits th
   const workItemId = 'oauth-lifecycle';
   f.store.command(f.ownerKey, 'commons', { id: 'lifecycle-propose', type: 'work.proposed', data: { workItemId, title: 'Do the work over OAuth', definitionOfDone: 'A stored text result',
     accountableMemberId: 'friend-dot', mode: 'read', independentVerificationRequired: false, ownerDecisionRequired: false } });
-  const call = async (name, args) => {
-    const response = await f.rpc('tools/call', { name, arguments: { workItemId, ...args } });
+  const call = async (name, args, token) => {
+    const response = await f.rpc('tools/call', { name, arguments: { workItemId, ...args } }, token);
     assert.notEqual(refusal(response.body), 'current_room_context_unavailable', `${name} exceeded the bounded command context`);
     assert.equal(response.body.error, undefined, `${name}: ${JSON.stringify(response.body).slice(0, 300)}`);
     assert.notEqual(response.body.result?.isError, true, `${name}: ${JSON.stringify(response.body).slice(0, 300)}`);
@@ -717,9 +717,36 @@ for (const normalized of [false, true]) test(`OAuth work:write lifecycle fits th
   await call('room_start_work', { expectedRevision: 4, requestId: 'life-restart' });
   const text = 'The finished text';
   const posted = await call('room_post_message', { body: text, id: 'life-result' });
-  const submitted = await call('room_submit_text_result', { expectedRevision: 5, evidenceMessageId: posted.command.data.messageId, evidenceMessageEventId: posted.event.id,
-    evidenceVersion: textVersionOf(text), previousCompletionEventId: null, producerId: 'friend-dot', summary: 'Done', nextAction: 'None', requestId: 'life-submit' });
-  assert.ok(submitted, 'the result submission returns a structured receipt');
+  const nextWorkItemId = 'oauth-lifecycle-next';
+  f.store.command(f.ownerKey, 'commons', { id: 'lifecycle-next-propose', type: 'work.proposed',
+    data: { workItemId: nextWorkItemId, title: 'Review the next artifact', definitionOfDone: 'Return a cited finding',
+      accountableMemberId: 'friend-dot', mode: 'read', independentVerificationRequired: false, ownerDecisionRequired: false } });
+  const submission = { expectedRevision: 5, evidenceMessageId: posted.command.data.messageId, evidenceMessageEventId: posted.event.id,
+    evidenceVersion: textVersionOf(text), previousCompletionEventId: null, producerId: 'friend-dot', summary: 'Done', nextAction: 'None', requestId: 'life-submit' };
+  const submitted = await call('room_submit_text_result', submission);
+  assert.equal(submitted.result.read.arguments.completionEventId, submitted.eventId);
+  assert.deepEqual(submitted.nextPickup, { tool: 'room_next', arguments: { roomId: 'commons', view: 'pickup' } });
+  const replay = await call('room_submit_text_result', submission);
+  assert.equal(replay.duplicate, true);
+  assert.equal(replay.eventId, submitted.eventId);
+  assert.deepEqual(replay.nextPickup, submitted.nextPickup);
+
+  const narrowConsent = await f.consent({ scope: 'rooms:read work:read work:write' });
+  const code = new URL(narrowConsent.headers.get('location')).searchParams.get('code');
+  const narrowed = await f.exchange({ grant_type: 'authorization_code', code, client_id: CLIENT.clientId,
+    redirect_uri: CLIENT.redirectUris[0], code_verifier: verifier, resource });
+  const narrowReplay = await call('room_submit_text_result', submission, (await narrowed.json()).access_token);
+  assert.equal(narrowReplay.eventId, submitted.eventId);
+  assert.equal(narrowReplay.nextPickup, undefined);
+
+  const { tool, arguments: pickupArgs } = submitted.nextPickup;
+  const pickup = reviewed((await f.rpc('tools/call', { name: tool, arguments: pickupArgs })).body);
+  assert.equal(pickup.nextRead.arguments.workItemId, nextWorkItemId);
+  const next = await call(pickup.nextRead.tool, pickup.nextRead.arguments);
+  assert.equal(next.continuation.arguments.workItemId, nextWorkItemId);
+  await call('room_accept_work', { workItemId: nextWorkItemId, expectedRevision: 0, requestId: 'life-next-accept' });
+  await call('room_start_work', { workItemId: nextWorkItemId, expectedRevision: 1, requestId: 'life-next-start' });
+
   const read = reviewed((await f.rpc('tools/call', { name: 'room_read_work', arguments: { workItemId, includeResult: true } })).body);
   assert.equal(read.work.state, 'completed');
   assert.ok(JSON.stringify(read).includes('The finished text'));
