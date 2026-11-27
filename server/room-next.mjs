@@ -353,6 +353,11 @@ export function readRoomNext(store, secret, roomId, { source, cursor, view, cons
       const addressed = correction?.nextRead ?? recoveryRead
         ?? packet.requests?.items[0]?.nextRead ?? packet.work?.items[0]?.nextRead;
       packet.nextRead = addressed ?? packet.requests?.nextRead ?? packet.work?.nextRead ?? null;
+      if (source && cursor && packet[source]?.reason === "cursor_changed") {
+        // Old source authority cannot certify either side of a pickup.
+        packet.nextRead = { tool: "room_next", arguments: { roomId, view: "pickup" } };
+        return packet;
+      }
 
       // A source cursor has already passed its room, viewer and permission checks.
       // Only a cursor issued while walking a combined pickup can certify the other source.
@@ -414,20 +419,7 @@ export function readRoomNext(store, secret, roomId, { source, cursor, view, cons
         const position = pageCursor(store, binding, checkpoint);
         if (!position) throw new ServiceError(422, "invalid_discovery_checkpoint", "Omit the stale checkpoint to restart finding review");
         const project = nextReviewerProject(store, roomId, auth.member.id, discoveryOrigin, position.after);
-        if ((project || canInvestigate) && !addressedComplete && packet.nextRead?.tool === "room_next") {
-          // The selected source continuation remembers any other unfinished
-          // source so the last empty page can finish the combined pickup.
-          const args = packet.nextRead.arguments;
-          const codec = conversationCursorCodec(store);
-          const original = codec.decode(args.cursor);
-          if (original) {
-            const pendingWork = args.source === "requests" ? resume?.pendingWork ?? packet.work?.nextRead?.arguments.cursor : null;
-            const discoveryWalk = { sequence: roomSequence(), pendingWork, consideredDiscovery: checkpoint };
-            packet.nextRead = { tool: "room_next", arguments: { ...args, view: "pickup",
-              cursor: codec.encode({ ...original, discoveryWalk }) } };
-            if (packet[args.source]?.nextRead) packet[args.source].nextRead = packet.nextRead;
-          }
-        } else if (project && addressedComplete) {
+        if (project && addressedComplete) {
           const nextRead = { tool: "room_read_project_discoveries", arguments: { roomId, offerId: project.offerId, limit: 5 } };
           packet.ifIdle ??= { status: "unavailable", reason: "invitation_not_selected" };
           packet.ifIdle.discoveryReview = { nextRead, consideredDiscovery: position.encode(project.after),
@@ -443,6 +435,21 @@ export function readRoomNext(store, secret, roomId, { source, cursor, view, cons
             if (["room_read_work", "room_read_result"].includes(lead.nextRead.tool)) packet.nextRead = lead.nextRead;
           }
         }
+      }
+      if (packet.nextRead?.tool === "room_next" && packet.nextRead.arguments.cursor) {
+        const args = packet.nextRead.arguments;
+        const codec = conversationCursorCodec(store);
+        const original = codec.decode(args.cursor);
+        // Keep the pickup view even for readers with no optional discovery.
+        // Only a combined scan with both sources available can certify a
+        // subsequent page as part of that same scan.
+        const cursor = original && combined && workCoverage !== "unavailable" && requestCoverage !== "unavailable"
+          ? codec.encode({ ...original, discoveryWalk: { sequence: roomSequence(),
+            pendingWork: args.source === "requests" ? resume?.pendingWork ?? packet.work?.nextRead?.arguments.cursor : null,
+            consideredDiscovery: consideredDiscovery ?? resume?.consideredDiscovery } })
+          : args.cursor;
+        packet.nextRead = { tool: "room_next", arguments: { ...args, view: "pickup", cursor } };
+        if (packet[args.source]?.nextRead) packet[args.source].nextRead = packet.nextRead;
       }
     }
     if (Buffer.byteLength(JSON.stringify(packet)) > MAX_BYTES)

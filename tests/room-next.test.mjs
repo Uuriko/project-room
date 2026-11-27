@@ -12,6 +12,7 @@ import { connectionHome, writePointer, writeProject } from "../cli/paths.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 import { mcpOAuthToolAllowed } from "../server/mcp-oauth.mjs";
 import { privateMarkers, privateWorkFixture } from "./helpers/private-work-fixture.mjs";
+import { readRoomNext } from "../server/room-next.mjs";
 
 // Validate actual MCP structuredContent against the deployed cached contract
 // and the catalog emitted by the current checkout.
@@ -269,6 +270,13 @@ test("an empty work page advances, keeps ongoing work, and invalidates stale aut
   assert.deepEqual(first.value.work.items, []);
   assert.deepEqual(first.value.nextRead, first.value.work.nextRead);
   assert.equal(first.value.ifIdle, undefined);
+  const readOnly = readRoomNext(f.store, f.reviewer.key, "commons", { view: "pickup" });
+  assert.equal(readOnly.work.coverage, "partial");
+  assert.deepEqual(readOnly.work.items, []);
+  assert.equal(readOnly.nextRead.arguments.view, "pickup", "continuation survives without discovery");
+  const readOnlyContinued = readRoomNext(f.store, f.reviewer.key, "commons", readOnly.nextRead.arguments);
+  assert.equal(readOnlyContinued.nextRead.tool, "room_read_work");
+  assert.equal(readOnlyContinued.nextRead.arguments.workItemId, id);
   const args = first.value.work.nextRead.arguments;
   const second = await f.mcp(f.reviewer, "room_next", args);
   assert.equal(second.ok, true, second.text);
@@ -286,6 +294,30 @@ test("an empty work page advances, keeps ongoing work, and invalidates stale aut
   const changed = await f.mcp(f.reviewer, "room_next", args);
   assert.equal(changed.value.work.reason, "cursor_changed");
   assert.deepEqual(changed.value.work.items, []);
+  const oldPickup = await f.mcp(f.reviewer, readOnly.nextRead.tool, readOnly.nextRead.arguments);
+  assert.equal(oldPickup.value.work.reason, "cursor_changed");
+  assert.deepEqual(oldPickup.value.nextRead, { tool: "room_next", arguments: { roomId: "commons", view: "pickup" } });
+  const restarted = await f.mcp(f.reviewer, oldPickup.value.nextRead.tool, oldPickup.value.nextRead.arguments);
+  assert.ok(restarted.value.work && restarted.value.requests);
+  assert.equal(restarted.value.ifIdle?.investigation, undefined);
+  const directory = await mkdtemp(join(tmpdir(), "room-next-stale-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const env = { HOME: directory, PROJECT_ROOM_KEYCHAIN: "0" };
+  const parent = connectionHome("reviewer", env);
+  await mkdir(parent, { recursive: true, mode: 0o700 });
+  const connection = join(parent, "connection");
+  saveAgentConnection(connection, {
+    version: 1, origin: f.origin, roomId: "commons", memberId: f.reviewer.id, token: f.reviewer.secret
+  });
+  writePointer("reviewer", connection, env);
+  writeProject(directory, { connection: "reviewer" });
+  const output = [];
+  assert.equal(await main(["next", "--source", "work", "--cursor", args.cursor],
+    { cwd: directory, env, out: value => output.push(value) }), 0);
+  const retry = JSON.parse(output.pop()).nextRead.command;
+  assert.deepEqual(retry, ["room", "next"]);
+  assert.equal(await main(retry.slice(1), { cwd: directory, env, out: value => output.push(value) }), 0);
+  assert.ok(JSON.parse(output.pop()).requests, "the CLI restart checks the request side too");
   const invalid = await f.mcp(f.reviewer, "room_next", { cursor: args.cursor });
   assert.equal(invalid.ok, false);
 });
