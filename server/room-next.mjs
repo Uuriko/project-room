@@ -238,6 +238,34 @@ function boundedPage(roomId, source, getPage) {
   }
 }
 
+function addressedWorkPage(store, roomId, auth, room, current, cursor) {
+  if (!current && room.workBytes > LEGACY_WORK_BYTES)
+    return unavailable(roomId, "work", "legacy_projection_budget",
+      { tool: "room_activation_pack", arguments: { roomId, view: "brief" } });
+  return boundedPage(roomId, "work", () => current
+    ? workPage(store, roomId, auth, room, cursor) : legacyWorkPage(store, roomId, auth, room, cursor));
+}
+
+// The dispatcher needs only an occupancy verdict while it holds its write
+// transaction. Do not expose another member's Work Threads or issue a cursor.
+export function recipientWorkAvailability(store, roomId, memberId) {
+  const { db } = store;
+  const current = isCurrentRoom(db, roomId);
+  const { room, member } = current ? withCurrentReadContext(db, roomId, budget => ({
+    room: readCurrentRecord(db, roomId, "metadata", "room", budget),
+    member: readCurrentRecord(db, roomId, "members", memberId, budget)
+  })) : {
+    room: db.prepare(`SELECT sequence, json_extract(projection,'$.room.ownerId') AS ownerId,
+      length(CAST(json_extract(projection,'$.workItems') AS BLOB)) AS workBytes FROM rooms WHERE id=?`).get(roomId),
+    member: JSON.parse(db.prepare(`SELECT member.value FROM rooms, json_each(projection,'$.members') AS member
+      WHERE rooms.id=? AND member.key=?`).get(roomId, memberId)?.value ?? "null")
+  };
+  if (!room || !member || member.active === false) return "work_unconfirmed";
+  const page = addressedWorkPage(store, roomId, { member }, room, current);
+  if (page.items.length) return "pending_work";
+  return page.coverage === "complete" ? "clear" : "work_unconfirmed";
+}
+
 // Check the four newest completion events by the existing room/type index.
 // Only a still-current Room-wide result can become a shared investigation.
 export function recentRoomResult(store, roomId, after = 0) {
@@ -334,11 +362,7 @@ export function readRoomNext(store, secret, roomId, { source, cursor, view, cons
 
     // Archived discussion and unrelated projections never enter these readers.
     // Private request membership is resolved only for the selected work IDs.
-    if (includeWork) packet.work = !current && room.workBytes > LEGACY_WORK_BYTES
-      ? unavailable(roomId, "work", "legacy_projection_budget",
-        { tool: "room_activation_pack", arguments: { roomId, view: "brief" } })
-      : boundedPage(roomId, "work", () => current
-        ? workPage(store, roomId, auth, room, cursor) : legacyWorkPage(store, roomId, auth, room, cursor));
+    if (includeWork) packet.work = addressedWorkPage(store, roomId, auth, room, current, cursor);
     let recoveryRead;
     if (includeRequests) {
       const { recoveryRead: recovery, ...requests } = boundedPage(roomId, "requests", () => current
