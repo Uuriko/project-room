@@ -3,7 +3,7 @@ import { loadConnection } from "../paths.mjs";
 import { boundedJson } from "../room-response.mjs";
 import { validId } from "../../src/events.js";
 
-const HELP = "room next [--source work|requests] [--cursor TOKEN] [--considered-discovery TOKEN]\nRead addressed work and incoming formal requests for the saved Room. Outputs JSON. Follow each partial source's nextRead.";
+const HELP = "room next [--source work|requests] [--cursor TOKEN] [--considered-discovery TOKEN]\nRead addressed work and incoming formal requests for the saved Room. Outputs JSON. Follow nextRead even when a pickup page is empty. Check the remaining rows and both source continuations before treating pickup as clear.";
 
 function selectionOf(argv) {
   const args = {};
@@ -18,6 +18,22 @@ function selectionOf(argv) {
     || args.cursor !== undefined && (!args.source || !/^[A-Za-z0-9_-]{1,4096}$/.test(args.cursor)))
     throw new Error(HELP);
   return args;
+}
+
+function annotatePickupRead(read, roomId) {
+  if (read?.tool !== "room_next" || read.arguments?.roomId !== roomId) return;
+  const args = read.arguments;
+  if (Object.keys(args).some(key => !["roomId", "source", "cursor", "view", "consideredDiscovery"].includes(key))
+      || (args.view !== undefined && args.view !== "pickup")) return;
+  const flags = [
+    ...(args.source === undefined ? [] : ["--source", args.source]),
+    ...(args.cursor === undefined ? [] : ["--cursor", args.cursor]),
+    ...(args.consideredDiscovery === undefined ? [] : ["--considered-discovery", args.consideredDiscovery])
+  ];
+  // Only echo commands accepted by this CLI's argument parser.
+  if (flags.some(flag => typeof flag !== "string")) return;
+  try { selectionOf(flags); } catch { return; }
+  read.command = ["room", "next", ...flags];
 }
 
 export async function nextCommand(argv, { cwd = process.cwd(), env = process.env,
@@ -60,15 +76,10 @@ export async function nextCommand(argv, { cwd = process.cwd(), env = process.env
       err("Room returned an invalid next view.");
       return 1;
     }
+    annotatePickupRead(value.nextRead, config.roomId);
     for (const source of ["work", "requests"]) {
       const read = value[source]?.nextRead;
-      const args = read?.arguments;
-      if (read?.tool === "room_next" && args?.source === source && args.roomId === config.roomId
-          && Object.keys(args).every(key => ["roomId", "source", "cursor", "view"].includes(key))
-          && (args.view === undefined || args.view === "pickup")
-          && (args.cursor === undefined || /^[A-Za-z0-9_-]{1,4096}$/.test(args.cursor))) {
-        read.command = ["room", "next", "--source", source, ...(args.cursor ? ["--cursor", args.cursor] : [])];
-      }
+      if (read?.arguments?.source === source) annotatePickupRead(read, config.roomId);
     }
     for (const row of value.work?.items ?? []) {
       const args = row.nextRead?.arguments;
