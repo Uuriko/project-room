@@ -219,10 +219,42 @@ for (const touch of [false, true]) {
     }
     await owner.waitForTimeout(300); // let the post-send snapshot settle before reading the chip
     assert.equal(await chip(), 'No new updates', 'messages you sent are not updates for you');
+    const briefPath = url => url.pathname.endsWith('/return-brief');
+    const openedRead = owner.waitForRequest(request => briefPath(new URL(request.url())));
     await clickChrome(owner, '#topbar-catchup');
     await owner.locator('#catchup-dialog').waitFor({ state: 'visible' });
-    await owner.waitForFunction(() => /changes? since your marker/.test(document.querySelector('#summary-grid').textContent));
-    assert.match(await owner.locator('#summary-grid').textContent(), /^0 changes since your marker/, 'the chip and Catch up agree');
+    assert.ok((await (await openedRead).response())?.ok(), 'opening Catch up fetched the Room brief');
+    const checkSettledCatchUp = async () => {
+      const settled = await owner.waitForFunction(() => {
+        const panel = document.querySelector('#return-brief-panel');
+        const summary = document.querySelector('#summary-grid').textContent;
+        if (panel.getAttribute('aria-busy') !== 'false' || !summary) return false;
+        return { summary, chip: document.querySelector('#catchup-count').textContent };
+      });
+      try {
+        const snapshot = await settled.jsonValue();
+        assert.equal(snapshot.chip, 'No new updates');
+        assert.match(snapshot.summary, /^0 changes since your marker/, 'the chip and settled Catch up agree');
+      } finally {
+        await settled.dispose();
+      }
+    };
+    await checkSettledCatchUp();
+
+    // A refresh may clear the grid between an earlier wait and a second DOM read.
+    const release = Promise.withResolvers();
+    await owner.route(briefPath, async route => {
+      await release.promise;
+      await route.continue();
+    });
+    try {
+      await owner.locator('#rb-refresh-button').click();
+      await owner.locator('#return-brief-panel[aria-busy="true"]').waitFor();
+      assert.equal(await owner.locator('#summary-grid').textContent(), '');
+    } finally {
+      release.resolve();
+    }
+    await checkSettledCatchUp();
     assert.deepEqual(errors, []);
   });
 }
