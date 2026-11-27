@@ -20,7 +20,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
   const selectionLifetime = 12 * 60 * 60 * 1000;
   const resize = $("#result-resize"), shell = $("#main");
   const widthKey = "project-room:preview-width:v1";
-  let previewWidth = 340, dragging = null;
+  let previewWidth = 416, dragging = null;
   try {
     const stored = Number(storage?.getItem(widthKey));
     if (Number.isFinite(stored) && stored >= 280 && stored <= 1600) previewWidth = stored;
@@ -98,10 +98,17 @@ export function installResultReader({ client, getState, getSession, sameSession,
     const checks = resultElement("result-release-checks");
     const checksBefore = resultElement(focused ? "result-work-context" : "result-correction");
     if (checks.nextElementSibling !== checksBefore) checksBefore.before(checks);
+    const expanded = docked && resultView.expanded === true;
     resultReader.classList.toggle("result-docked", docked);
+    resultReader.classList.toggle("result-expanded", expanded);
+    const expand = resultElement("result-expand");
+    const moveFocus = document.activeElement === expand && !docked;
+    expand.hidden = !docked;
+    expand.textContent = uiText(expanded ? "result.restorePreview" : "result.expandPreview");
+    if (moveFocus) resultElement("close-result").focus({ preventScroll: true });
     resultReader.classList.toggle("result-mobile", !docked && !focused);
     resultElement("close-result").hidden = focused;
-    resize.hidden = !docked;
+    resize.hidden = !docked || expanded;
     applyWidth();
     const host = focused ? shell.querySelector(".room-main") : shell;
     if (host && resultReader.parentElement !== host) {
@@ -339,7 +346,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     if (!preserveSaved) forgetSelection();
     const view = resultView;
     finishResize();
-    resultView = null; resultReader.classList.remove("result-docked", "result-mobile", "result-focused"); resultReader.hidden = true; resultParking.append(resultReader); resultElement("result-title").textContent = "Result";
+    resultView = null; resultReader.classList.remove("result-docked", "result-mobile", "result-focused", "result-expanded"); resultReader.hidden = true; resultParking.append(resultReader); resultElement("result-title").textContent = "Result";
     showCorrection(null);
     showReleaseChecks(null);
     showOutcome(null);
@@ -367,6 +374,12 @@ export function installResultReader({ client, getState, getSession, sameSession,
     }
   }
   resultElement("close-result").addEventListener("click", () => closeResult());
+  resultElement("result-expand").addEventListener("click", () => {
+    if (!resultView || resultView.focused || !wide.matches) return;
+    finishResize();
+    resultView.expanded = !resultView.expanded;
+    mountResultReader();
+  });
   resultElement("result-copy-link").textContent = uiText("result.copyLink");
   resultElement("result-copy-text").textContent = uiText("result.copyText");
   resultElement("result-download").textContent = uiText("result.download");
@@ -441,6 +454,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     if (onDiscuss(message, selection) === false) return;
     if (!view.focused && wide.matches && resultView === view) {
       view.fromResults = false;
+      view.expanded = false;
       saveSelection(view);
       resultStatus();
     } else closeResult(false);
@@ -544,6 +558,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       resultElement("result-retry").hidden = true; resultElement("result-retry").disabled = true;
       if (view.restoreDetails) workRecord(view.workItemId).querySelector(".work-details").open = false;
       mountResultReader(); resultReader.hidden = false;
+      resultReader.querySelector(".result-content").scrollTop = 0;
       if (focus) resultElement("result-title").focus();
       loadExactResult(view);
   }

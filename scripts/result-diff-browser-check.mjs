@@ -355,6 +355,30 @@ for (const width of [1440, 390]) {
     await reviewer.locator("#result-diff summary").press("Enter");
     await reviewer.locator("#result-diff").getByText(/- Result A/).waitFor();
     assert.match(await reviewer.locator("#result-diff").innerText(), /- Result A/);
+    const expand = reviewer.locator("#result-expand");
+    assert.equal(await expand.isVisible(), width === 1440);
+    if (width === 1440) {
+      const reader = reviewer.locator("#result-dialog");
+      const widthBefore = (await reader.boundingBox()).width;
+      await expand.press("Enter");
+      assert.equal(await expand.textContent(), "Restore");
+      assert.equal(await reviewer.locator(".room-main").isVisible(), false);
+      assert.equal(await reviewer.locator("#result-resize").isVisible(), false);
+      assert.ok((await reader.boundingBox()).width > widthBefore * 2);
+      assert.equal(await reviewer.locator("#result-body").textContent(), revisedBody);
+      assert.equal(await reviewer.locator("#result-diff details").getAttribute("open"), "");
+      assert.equal(await expand.evaluate(node => node === document.activeElement), true);
+      await reviewer.setViewportSize({ width: 390, height: 844 });
+      await expand.waitFor({ state: "hidden" });
+      assert.equal(await reviewer.locator("#close-result").evaluate(node => node === document.activeElement), true);
+      await reviewer.setViewportSize({ width: 1440, height: 900 });
+      await expand.waitFor({ state: "visible" });
+      assert.equal(await expand.textContent(), "Restore");
+      await expand.click();
+      assert.equal(await expand.textContent(), "Expand");
+      assert.equal(await reviewer.locator(".room-main").isVisible(), true);
+      assert.equal(await reviewer.locator("#result-resize").isVisible(), true);
+    }
     await reviewer.locator("#close-result").click();
     assert.equal(await card(reviewer).locator("[data-read-result]").evaluate(node => node === document.activeElement), true);
     await openWorkFromSearch(reviewer, "calm-result", "A first result");

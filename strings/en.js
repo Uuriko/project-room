@@ -584,6 +584,8 @@ export default {
   "result.comparisonSummary": "{removed} lines removed, {added} added. Previous approval never carries over; review the exact new text.",
   "clipboard.pending": "Clipboard is still busy. You can keep working.",
   "result.closePreview": "Close preview",
+  "result.expandPreview": "Expand",
+  "result.restorePreview": "Restore",
   "result.backConversation": "Back to conversation",
   "result.resize": "Resize preview",
   "result.searchCount": "{count} results",

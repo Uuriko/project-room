@@ -34,7 +34,7 @@ function comparisonHtml(before, after, esc, structuredPatch) {
   let removed = 0, added = 0, total = 0;
   const visible = [];
   for (const hunk of patch.hunks) {
-    if (total < 200) visible.push(esc(uiText("result.revisionRange", { before: hunk.oldStart, after: hunk.newStart })));
+    if (total < 200) visible.push(`<span class="diff-range">${esc(uiText("result.revisionRange", { before: hunk.oldStart, after: hunk.newStart }))}</span>`);
     for (const line of hunk.lines) {
       if (line === "\\ No newline at end of file") continue;
       if (line.startsWith("-")) removed++;
@@ -46,7 +46,7 @@ function comparisonHtml(before, after, esc, structuredPatch) {
       }
     }
   }
-  if (total > 200) visible.push(esc(uiText("result.remainingPatchRows", { count: total - 200 })));
+  if (total > 200) visible.push(`<span class="diff-range">${esc(uiText("result.remainingPatchRows", { count: total - 200 }))}</span>`);
   return [heading(uiText("result.comparisonSummary", { removed, added })),
     '<pre class="result-diff">', visible.join("\n"), '</pre>'].join("");
 }

@@ -2417,7 +2417,7 @@ function setActiveChannel(id, preserveWork = false) {
   if (!state || busy || requestReading || composerFiles.some(file => file.status === "uploading")) return;
   if (!preserveWork) {
     updatesUi?.close();
-    if (document.querySelector(".result-focused:not([hidden])")) closeResult(false);
+    if (document.querySelector(":is(.result-focused, .result-expanded):not([hidden])")) closeResult(false);
   }
   const leftWork = !preserveWork && leaveWorkSelection();
   const next = state.channels[id] && !state.channels[id].archivedAt ? id : DEFAULT_CHANNEL_ID;
@@ -2537,7 +2537,7 @@ $("#thread-conversation-list").addEventListener("click", event => {
 function openDirectMessage(memberId) {
   if (!Object.hasOwn(state?.members ?? {}, memberId) || state.members[memberId].active === false || state.members[memberId].identityRevoked || busy || requestReading || composerFiles.some(file => file.status === "uploading")) return;
   updatesUi?.close();
-  if (document.querySelector(".result-focused:not([hidden])")) closeResult(false);
+  if (document.querySelector(":is(.result-focused, .result-expanded):not([hidden])")) closeResult(false);
   saveComposer(); viewPositions.set(conversationViewKey(), $("#message-list").scrollTop);
   requestEpoch++; requestReading = false; requestMode = null; assistantDraft = null;
   leaveWorkSelection();
