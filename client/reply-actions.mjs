@@ -195,12 +195,17 @@ const listedRequestKeys = request => {
 };
 const selectedContextFields = ["contextMessageId", "terminalActorId", "responseMessageId", "responseContextSequence", "reason"];
 const selectedProgressFields = ["acknowledgedAt", "lastActivityAt", "progressState", "progressNote", "progressEventId"];
+const selectedStageDates = ["acceptedAt", "workingAt", "needsInputAt", "errorAt"];
 function selectedRequestKeys(request) {
   if (!request) return false;
   const stamped = Object.hasOwn(request, "answerCredential");
   const progress = selectedProgressFields.some(key => Object.hasOwn(request, key));
+  const stageDates = selectedStageDates.filter(key => Object.hasOwn(request, key));
   return keys(request, [...requestFields, ...selectedContextFields, ...(stamped ? ["answerCredential"] : []),
-    ...(progress ? selectedProgressFields : [])])
+    ...(progress ? selectedProgressFields : []), ...stageDates])
+    && (!stageDates.length || progress && stageDates.every(key => date(request[key])
+      && Date.parse(request.acknowledgedAt) <= Date.parse(request[key])
+      && Date.parse(request[key]) <= Date.parse(request.lastActivityAt)))
     && (!progress || date(request.acknowledgedAt) && date(request.lastActivityAt)
       && Date.parse(request.acknowledgedAt) <= Date.parse(request.lastActivityAt)
       && validProgress({ state: request.progressState, note: request.progressNote, at: request.lastActivityAt })
