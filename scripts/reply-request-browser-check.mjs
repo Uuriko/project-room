@@ -70,6 +70,8 @@ for (const width of [1280, 390, 320]) test(`request journey at ${width}px: reque
   assert.equal(f.state().replyRequests[id].recipientId, "guest");
   const clarify = (await record(guest, id)).getByRole("button", { name: "Clarify", exact: true });
   assert.equal(await clarify.getAttribute("title"), "Reply without closing this request");
+  assert.equal(await (await record(guest, id)).locator("[data-needs-reply]").textContent(), "Your reply is needed");
+  assert.equal(await (await record(owner, id)).locator("[data-needs-reply]").count(), 0);
   assert.equal(await (await record(owner, id)).getByRole("button", { name: "Reply", exact: true }).count(), 1);
   await clarify.focus(); await guest.keyboard.press("Enter");
   await input(guest).fill("Should it include the review?"); await input(guest).press("Enter");

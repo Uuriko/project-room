@@ -368,6 +368,9 @@ for (const storage of ["legacy", "normalized"]) {
     await signInFixture(page, owner);
     const row = page.locator(`[data-message-record-id="${messageId}"]`);
     await row.getByText("I finished reviewing the project brief.", { exact: true }).waitFor();
+    const settledQuestion = page.locator("[data-message-record-id=question]");
+    await settledQuestion.getByText("Answered", { exact: true }).waitFor();
+    assert.equal(await settledQuestion.locator("[data-request-run]").count(), 0, "a settled answer has no transient host label");
     await page.clock.install();
     await page.clock.fastForward(6000);
     assert.equal(await row.locator('[data-download-file="brief-file"]').count(), 0);

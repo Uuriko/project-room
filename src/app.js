@@ -3238,12 +3238,15 @@ function restoreComposer(draft) {
   autosizeComposer();
 }
 function requestRunLabel(id) {
-  if(client.sectionAvailability('requestRuns')?.available===false)return uiText("currentRoom.executionUnavailable");
+  if (state?.replyRequests?.[id]?.status !== "open") return "";
+  if (client.sectionAvailability("requestRuns")?.available === false) return uiText("currentRoom.executionUnavailable");
   const run = requestRuns[id];
-  if (!run || state?.replyRequests?.[id]?.status !== "open") return "";
-  const status = run.state === "working" && Date.now() - run.updatedAt > 120000 ? "unknown" : run.state;
+  if (!run) return "";
+  if (run.state === "working" && Date.now() - run.updatedAt > 120000) {
+    return uiText("currentRoom.requestRunQuiet");
+  }
   return ({ working: "Agent working", result_ready: "Result saved · delivery pending",
-    needs_attention: "Host needs attention · original attempt retained", unknown: "Host connection lost · original attempt retained" })[status] ?? "";
+    needs_attention: "Host needs attention · original attempt retained", unknown: uiText("currentRoom.requestRunUnknown") })[run.state] ?? "";
 }
 async function refreshRequestRuns({ force = false } = {}) {
   if(client.sectionAvailability('requestRuns')?.available===false)return;
@@ -3275,13 +3278,18 @@ function requestControls(message) {
       ? `<button type="button" class="message-to-work" data-message-id="${esc(previous.id)}" data-message-action="request-follow-up">Follow up</button>` : "";
   }
   const own = session.member.id, open = request.status === "open";
-  const status = open ? state.members[request.recipientId]?.active === false ? "Recipient unavailable" : "Reply requested"
+  const recipientAvailable = state.members[request.recipientId]?.active !== false;
+  const needsReply = open && recipientAvailable && own === request.recipientId;
+  const status = open ? !recipientAvailable ? "Recipient unavailable"
+    : needsReply ? uiText("currentRoom.requestNeedsYourReply") : "Reply requested"
     : ({ answered: "Answered", declined: "Declined", cancelled: "Cancelled" })[request.status];
+  const runtime = open && recipientAvailable && state.members[request.recipientId]?.kind === "agent"
+    ? `<span class="request-run" data-request-run="${esc(message.id)}" role="status">${esc(requestRunLabel(message.id))}</span>` : "";
   const actions = [];
   if (replyFollowUp(state, request.id, own)) actions.push(["follow-up", "Follow up"]);
   if (open && own === request.recipientId) actions.push(["answered", "Answer request"], ["declined", "Decline"]);
   if (open && (own === request.requesterId || own === state.room.ownerId && session.member.kind === "human")) actions.push(["cancelled", "Cancel request"]);
-  return `<span class="request-state">${esc(status)}</span><span class="request-state" data-request-run="${esc(message.id)}" role="status">${esc(requestRunLabel(message.id))}</span>${actions.map(([kind, label]) =>
+  return `<span class="request-state"${needsReply ? " data-needs-reply" : ""}>${esc(status)}</span>${runtime}${actions.map(([kind, label]) =>
     `<button type="button" class="message-to-work" data-message-id="${esc(message.id)}" data-message-action="request-${kind}">${label}</button>`).join("")}`;
 }
 function syncRequestComposer() {
@@ -3637,6 +3645,7 @@ function syncWorkReturnControl() {
   const origin = currentWorkOrigin();
   button.disabled = false;
   button.hidden = !workNavigationContext() || !/^#pr-record\/(work|message|result)\//.test(location.hash);
+  button.toggleAttribute("data-thread-fallback", !origin && /^#pr-record\/message\//.test(location.hash));
   button.textContent = origin ? `Back to ${origin.type === "updates" ? "Updates" : origin.type === "board" ? "Board" : "conversation"}` : document.querySelector(".result-focused:not([hidden])") ? "Back to Updates" : "Back to room";
 }
 function clearWorkNavigation() {
@@ -5188,7 +5197,11 @@ $("#reply-mention").addEventListener("click", () => {
   } else applyMentionMember(author);
   updateReply();
 });
-$("#thread-back").addEventListener("click", () => switchThread(null));
+$("#thread-back").addEventListener("click", () => {
+  const fallback = $("#work-navigation-return");
+  if (!fallback.hidden && fallback.hasAttribute("data-thread-fallback")) fallback.click();
+  else switchThread(null);
+});
 // Per-thread mutes: a private per-member row on the server (thread_mutes).
 // Muting suppresses the thread's activity from the notification/unread feed;
 // unmuting restores it on the next read. The server resolves any message id

@@ -145,10 +145,10 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   await page.reload();
   await page.locator("#main").waitFor({ state: "visible" });
   await page.locator("#thread-bar").waitFor({ state: "visible" });
-  assert.equal(await page.locator("#work-navigation-return").textContent(), "Back to room");
+  assert.equal(await page.locator("#work-navigation-return").isVisible(), false, "the cold thread has one visible Back action");
   const replyDraft = "Keep this reply when I return to the room.";
   await page.locator("#message-input").fill(replyDraft);
-  await page.locator("#work-navigation-return").press("Enter");
+  await page.locator("#thread-back").press("Enter");
   await page.locator("#thread-bar").waitFor({ state: "hidden" });
   // The private reply's thread lives in the direct conversation (DM-first); the public root is in the channel.
   await openChannel(page);
