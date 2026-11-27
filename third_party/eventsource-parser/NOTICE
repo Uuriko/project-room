@@ -1,0 +1,8 @@
+eventsource-parser 4.1.3, MIT
+Upstream: https://github.com/rexxars/eventsource-parser
+Source revision: f46b5575f72682527ed936763983bdda0e1283f5
+Release tarball: https://registry.npmjs.org/eventsource-parser/-/eventsource-parser-4.1.3.tgz
+Tarball integrity: sha512-jZVIVilXZfAx6H20ZKKEj5dabbpD9ETmMj3uHsjMmgBzBHB6tsHrmdWB4mAiy3amtN6MOoVkfXRQu4wf1n88Rw==
+
+parse.js, errors.js, their source maps, and LICENSE are unchanged files
+from the release tarball. Only the core parser is used.

@@ -52,7 +52,7 @@ export function openRequestJournal(filename) {
 // execute receives no connection secret: only the selected conversation and
 // preparation. It returns { body, codeResult? }, not commands. Room validates the exact
 // original answer basis on delivery; no automatic rebase after clarification.
-export async function runRequestOnce({ connection, requestMessageId, db, execute, preflight, signal, allowRequest, selectRequest, savedRequestId, stagedFileId }) {
+export async function runRequestOnce({ connection, requestMessageId, db, execute, preflight, signal, allowRequest, selectRequest, savedRequestId, stagedFileId, answeredRecoveryOnly = false }) {
   if (typeof execute !== "function" || !connection.memberId) throw new Error("A configured host and pinned member are required");
   if (allowRequest !== undefined && typeof allowRequest !== "function") throw new Error("Request selection must be a function");
   if (selectRequest !== undefined && typeof selectRequest !== "function") throw new Error("Execution selection must be a function");
@@ -142,6 +142,8 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
   const prior = db.prepare("SELECT * FROM request_runs WHERE id=?").get(id);
   if (savedRequestId !== undefined && !prior?.response)
     throw new Error("Saved reply is unavailable; reconcile the original attempt");
+  if (answeredRecoveryOnly && (savedRequestId === undefined || context.request.status !== "answered"))
+    return { status: "saved_recovery_deferred" };
   if (prior) {
     if (!prior.response) throw new Error("Host outcome is unknown; reconcile the original attempt before proceeding");
     if (stagedFileId !== undefined && prior.file_id !== stagedFileId) {
@@ -159,7 +161,7 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
       Object.assign(prior, db.prepare("SELECT file_id,file_sha256,file_state FROM request_runs WHERE id=?").get(id));
       if (prior.file_id !== stagedFileId) throw new Error("The selected file changed during recovery");
     }
-    if (prior.file_id && (prior.delivered || context.request.status !== "open")) {
+    if (answeredRecoveryOnly || prior.file_id && (prior.delivered || context.request.status !== "open")) {
       const input = JSON.parse(prior.response);
       const command = buildReplyCommand(connection, "room_respond_to_request", input);
       const messageId = command.data.messageId;
@@ -175,6 +177,8 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
           throw new Error("The original answer operation is unconfirmed");
         db.prepare("UPDATE request_runs SET delivered=1, delivery_refused=0 WHERE id=?").run(id);
       }
+      if (!prior.file_id && !prior.reported)
+        return reportDelivered(prior, { status: "delivered", requestId: id, hostExecuted: false, reportOnly: true });
       return finishDelivery(prior, messageId);
     }
     // A known local delivery whose run report is pending only reports; the saved
@@ -305,13 +309,34 @@ export async function runRequestQueue({ connection, db, execute, preflight, sign
   if (!Number.isInteger(intervalMs) || intervalMs < 1000 || intervalMs > 60000) throw new Error("Invalid polling interval");
   const client = new RoomAgentClient(connection);
   let delay = intervalMs, connectionUnavailable = false, pendingStatement, recoveryRow = 0;
+  let pageCursor, immediatePages = 0, queueIncomplete = false, pagingUnavailable = false;
   const pending = request => (pendingStatement ??= db.prepare(`SELECT 1 FROM request_runs WHERE ${unfinished} AND json_extract(response,'$.responseToRequestId')=?`)).get(request.id);
   while (!signal?.aborted) {
-    let cursor = null, reportPending = false;
+    let cursor = null, reportPending = false, nextCursor;
     try {
-      const { requests, evaluatedThrough, runs, blockedBy = {} } = await client.agentWork({ signal });
-      await onPoll();
-      cursor = evaluatedThrough;
+      let work;
+      try {
+        work = await client.agentWork(pageCursor ? { signal, paged: true, cursor: pageCursor } : { signal });
+      } catch (error) {
+        if (error?.status !== 422 || error.code !== "reply_list_too_large") throw error;
+        if (!pagingUnavailable) {
+          try { work = await client.agentWork({ signal, paged: true }); }
+          catch (pageError) {
+            // An older Room can refuse the page selector. Never treat its
+            // partial queue as authority to launch or replay an open attempt.
+            if (pageError?.status !== 422 || !["invalid_request", "reply_list_too_large"].includes(pageError.code)) throw pageError;
+            pagingUnavailable = pageError.code === "invalid_request";
+          }
+        }
+      }
+      if (work) {
+        await onPoll();
+        cursor = work.evaluatedThrough;
+        nextCursor = work.page?.nextCursor ?? undefined;
+      }
+      const { requests = [], runs = {}, blockedBy = {} } = work ?? {};
+      const partialWork = !work || Boolean(work.page?.hasMore || pageCursor !== undefined);
+      const observedRequests = new Set(requests.map(request => request.id));
       const owned = request => Object.hasOwn(runs, request.id);
       const recovering = new Set();
       // agentWork deliberately lists open requests only. A reply may already be
@@ -332,7 +357,9 @@ export async function runRequestQueue({ connection, db, execute, preflight, sign
           // Preserve explicit attention fences for requests still being worked.
           if (runs[requestMessageId]?.state === "needs_attention") continue;
           const result = await runRequestOnce({ connection, requestMessageId, db, execute, preflight, signal,
-            allowRequest, selectRequest, savedRequestId: record.id });
+            allowRequest, selectRequest, savedRequestId: record.id,
+            answeredRecoveryOnly: partialWork && !observedRequests.has(requestMessageId) });
+          if (result.status === "saved_recovery_deferred") continue;
           emit(result);
           if (result.status === "file_pending") reportPending = true;
           recovering.add(requestMessageId);
@@ -360,6 +387,10 @@ export async function runRequestQueue({ connection, db, execute, preflight, sign
         try { emit(await runRequestOnce({ connection, requestMessageId: request.id, db, execute, preflight, signal, allowRequest, selectRequest })); }
         catch (error) {
           if (error?.code === "host_isolation_unavailable") throw error;
+          if (error?.code === "provider_usage_limited") {
+            emit({ status: error.code, requestMessageId: request.id });
+            break;
+          }
           if (error?.runReportPending) { reportPending = true; emit({ status: "report_pending", requestMessageId: request.id }); continue; }
           emit({ status: "needs_attention", requestMessageId: request.id });
           if ([401, 429].includes(error?.status) || error?.status >= 500
@@ -370,12 +401,28 @@ export async function runRequestQueue({ connection, db, execute, preflight, sign
       // claiming the connection is unavailable.
       delay = reportPending ? Math.min(delay * 2, 60000) : intervalMs;
       connectionUnavailable = false;
+      if (!work && !queueIncomplete && !signal?.aborted) {
+        emit({ status: "queue_read_incomplete", reason: "reply_list_too_large",
+          nextRead: { tool: "room_list_requests", arguments: { direction: "incoming", status: "open" } } });
+      }
+      queueIncomplete = !work;
     } catch (error) {
       if (error?.code === "host_isolation_unavailable") throw error;
+      if (pageCursor && ["invalid_agent_work_cursor", "invalid_reply_cursor", "reply_cursor_identity_changed", "cursor_changed"].includes(error?.code)) {
+        pageCursor = undefined;
+        if (++immediatePages < 4) continue;
+      }
       if (!signal?.aborted && !connectionUnavailable) emit({ status: "connection_unavailable" });
       connectionUnavailable = true;
       delay = Math.min(delay * 2, 60000);
     }
+    if (nextCursor && nextCursor === pageCursor) {
+      if (!queueIncomplete && !signal?.aborted) emit({ status: "queue_read_incomplete", reason: "nonprogressing_cursor" });
+      nextCursor = undefined;
+    }
+    pageCursor = nextCursor;
+    if (pageCursor && !reportPending && !signal?.aborted && ++immediatePages < 4) continue;
+    immediatePages = 0;
     const waitingAt = Date.now(); let changed = false;
     if (stream && Number.isSafeInteger(cursor) && !signal?.aborted) {
       try { ({ changed } = await client.waitForChange(cursor, { signal, timeoutMs: delay })); }
