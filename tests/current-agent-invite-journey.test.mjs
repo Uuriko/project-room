@@ -151,19 +151,33 @@ test('existing agent lost-response retry preserves identity/grants and finishes 
  };
  const done = await peerCall('room_submit_text_result', resultInput);
  assert.equal(done.result.read.arguments.completionEventId, done.eventId);
+ assert.equal(done.preparedPickup.nextRead.arguments.workItemId, 'task-next');
  const replayedResult = await peerCall('room_submit_text_result', resultInput);
  assert.equal(replayedResult.duplicate, true);
  assert.equal(replayedResult.eventId, done.eventId);
  assert.deepEqual(replayedResult.nextPickup, done.nextPickup);
  assert.deepEqual(done.nextPickup, { tool: 'room_next', arguments: { roomId: 'commons', view: 'pickup' } });
- const next = await peerCall(done.nextPickup.tool, done.nextPickup.arguments);
- assert.equal(next.nextRead.arguments.workItemId, 'task-next');
- const nextWork = await peerCall(next.nextRead.tool, next.nextRead.arguments);
- const second = await peerCall('room_begin_work', { workItemId: 'task-next', expectedRevision: nextWork.revision });
+ const nextRead = done.preparedPickup.nextRead;
+ assert.deepEqual(replayedResult.preparedPickup.nextRead, nextRead);
+ const nextWork = await peerCall(nextRead.tool, nextRead.arguments);
+ const secondInput = { workItemId: nextRead.arguments.workItemId, expectedRevision: nextWork.revision };
+ const second = await peerCall('room_begin_work', secondInput);
  assert.equal(second.working, true);
  assert.deepEqual(second.confirmed.map(row => row.action), ['room_accept_work', 'room_start_work']);
  assertStartedEvent(second.confirmed[1].eventId, 'task-next');
  assert.notEqual(second.confirmed[1].eventId, begin.confirmed[1].eventId);
+ const throughSecondStart = s.headSequence('commons');
+ await peerCall(nextRead.tool, nextRead.arguments);
+ const replayedSecond = await peerCall('room_begin_work', secondInput);
+ assert.equal(replayedSecond.confirmed[1].eventId, second.confirmed[1].eventId);
+ assert.equal(s.headSequence('commons'), throughSecondStart);
+ const handoff = s.db.prepare("SELECT body FROM events WHERE room_id=? AND sequence>? AND sequence<=? ORDER BY sequence")
+  .all('commons', throughStart, throughSecondStart).map(row=>JSON.parse(row.body));
+ assert.ok(handoff.every(event=>event.actorId===peer.identityId), 'there is no sender event between the starts');
+ assert.deepEqual(handoff.filter(event=>['work.completed','work.accepted','work.started'].includes(event.type))
+  .map(event=>[event.type,event.data.workItemId]), [
+    ['work.completed','task'], ['work.accepted','task-next'], ['work.started','task-next']
+  ]);
  const secondRead = await peerCall('room_read_work', { workItemId: 'task-next' });
  assert.equal(secondRead.work.state, 'working');
  assert.equal(item().state, 'completed');

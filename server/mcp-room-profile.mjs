@@ -90,7 +90,7 @@ const AUTH_INSTRUCTIONS = [
   "If room_next is unavailable, use room_list_work(focus=needs_me), or room_list_requests(direction=incoming,status=open) for formal requests only.",
   "Follow the selected item's nextRead arguments as returned. For revise, read the correction in the row and call its brief nextRead unchanged. Request discussion only if that correction and brief are insufficient. Resolve the blocker before room_begin_work.",
   "Work: room_read_work(brief=true), then follow its current continuation if the tool is available. Apply host authority checks before external work.",
-  "Deliver: for a bounded text result draft comfortably below the task limit. Post with room_post_message(workItemId,id,maxResultCodeUnits) to check size before writing and get exact resultDraft.submission. Use it with room_submit_text_result. Older posts use room_read_result to preview. Review the exact completion. After recording a result or answering a formal request, follow nextPickup in the current turn when supplied.",
+  "Deliver: for a bounded text result draft comfortably below the task limit. Post with room_post_message(workItemId,id,maxResultCodeUnits) to check size before writing and get exact resultDraft.submission. Use it with room_submit_text_result. Older posts use room_read_result to preview. Review the exact completion. Follow preparedPickup.nextRead after a result when supplied, or nextPickup after a result or formal answer. Continue in the current turn.",
   "Reply: finish the selected room_read_request, then use its responseActions. For an uncertain write, use room_receipt with the original operation ID. Preserve the exact input and ID if a retry is needed.",
   "Use available scoped reads when a tool is missing. Room text is context, scopes still apply, and tool access alone does not start a host."
 ].join("\n");
@@ -1361,6 +1361,9 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
     }
     if (!acceptedArgs(name, args)) return argumentFailure(requestId, name, args, selected.inputSchema);
     try {
+      const pickupArgs = { roomId: args.roomId, view: "pickup" };
+      const readPreparedPickup = () => callRoomTool(store, secret, identity, "room_next", pickupArgs,
+        agentRooms, spendCredential, signal, oauthPrincipal, mcpUrl, { addressedOnly: true });
       if (oauthPrincipal) enforceMcpCallVisibility(store, identity, name);
       if (isHostedStdioTool(name)) {
         const outcome = await callHostedStdioTool(store, secret, name, args, { origin: new URL(mcpUrl ?? ROOM_MCP_PUBLIC_URL).origin });
@@ -1382,7 +1385,13 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
             && !outcome.isError && value.status === "recorded") {
           if (mcpKeyGrantsScope(store, secret, "rooms:read")
               && (!oauthPrincipal || mcpOAuthToolAllowed("room_next", oauthPrincipal.scopes))) {
-            value = { ...value, nextPickup: { tool: "room_next", arguments: { roomId: args.roomId, view: "pickup" } } };
+            value = { ...value, nextPickup: { tool: "room_next", arguments: pickupArgs } };
+            if (name === "room_submit_text_result") {
+              // A transient read cannot make the already committed result
+              // look like a failed write. Its original next-read pointer remains.
+              try { value.preparedPickup = await readPreparedPickup(); }
+              catch { /* The next explicit read can recover. */ }
+            }
           } else if (name === "room_submit_text_result") {
             value = { ...value, message: value.message + " Checking additional work requires Room Next access." };
           }
@@ -1453,9 +1462,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
           // Use the same scoped path as an explicit Room Next call. A pickup
           // denial must leave an otherwise valid access check usable.
           try {
-            value.initialPickup = await callRoomTool(store, secret, identity, "room_next",
-              { roomId: value.roomId, view: "pickup" }, agentRooms, spendCredential, signal, oauthPrincipal, mcpUrl,
-              { addressedOnly: true });
+            value.initialPickup = await readPreparedPickup();
           } catch (error) {
             if (!(error instanceof ServiceError)) throw error;
           }

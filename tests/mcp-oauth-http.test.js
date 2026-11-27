@@ -729,6 +729,7 @@ for (const normalized of [false, true]) test(`OAuth work:write lifecycle fits th
   const submitted = await call('room_submit_text_result', submission);
   assert.equal(submitted.result.read.arguments.completionEventId, submitted.eventId);
   assert.deepEqual(submitted.nextPickup, { tool: 'room_next', arguments: { roomId: 'commons', view: 'pickup' } });
+  assert.equal(submitted.preparedPickup.nextRead.arguments.workItemId, nextWorkItemId);
   const replay = await call('room_submit_text_result', submission);
   assert.equal(replay.duplicate, true);
   assert.equal(replay.eventId, submitted.eventId);
@@ -742,6 +743,7 @@ for (const normalized of [false, true]) test(`OAuth work:write lifecycle fits th
     const narrowReplay = await call('room_submit_text_result', submission, (await narrowed.json()).access_token);
     assert.equal(narrowReplay.eventId, submitted.eventId);
     assert.equal(narrowReplay.nextPickup, undefined);
+    assert.equal(narrowReplay.preparedPickup, undefined);
     assert.match(narrowReplay.message, /Checking additional work requires Room Next access/);
     assert.doesNotMatch(narrowReplay.message, /room_check_access/);
     assert.ok(!JSON.stringify(narrowReplay).includes(nextWorkItemId));
