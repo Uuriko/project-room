@@ -731,15 +731,18 @@ for (const normalized of [false, true]) test(`OAuth work:write lifecycle fits th
   assert.equal(replay.eventId, submitted.eventId);
   assert.deepEqual(replay.nextPickup, submitted.nextPickup);
 
-  const narrowConsent = await f.consent({ scope: 'rooms:read work:read work:write' });
-  const code = new URL(narrowConsent.headers.get('location')).searchParams.get('code');
-  const narrowed = await f.exchange({ grant_type: 'authorization_code', code, client_id: CLIENT.clientId,
-    redirect_uri: CLIENT.redirectUris[0], code_verifier: verifier, resource });
-  const narrowReplay = await call('room_submit_text_result', submission, (await narrowed.json()).access_token);
-  assert.equal(narrowReplay.eventId, submitted.eventId);
-  assert.equal(narrowReplay.nextPickup, undefined);
-  assert.match(narrowReplay.message, /Checking additional work requires Room Next access/);
-  assert.ok(!JSON.stringify(narrowReplay).includes(nextWorkItemId));
+  for (const scope of ['rooms:read work:read work:write', 'work:write']) {
+    const narrowConsent = await f.consent({ scope });
+    const code = new URL(narrowConsent.headers.get('location')).searchParams.get('code');
+    const narrowed = await f.exchange({ grant_type: 'authorization_code', code, client_id: CLIENT.clientId,
+      redirect_uri: CLIENT.redirectUris[0], code_verifier: verifier, resource });
+    const narrowReplay = await call('room_submit_text_result', submission, (await narrowed.json()).access_token);
+    assert.equal(narrowReplay.eventId, submitted.eventId);
+    assert.equal(narrowReplay.nextPickup, undefined);
+    assert.match(narrowReplay.message, /Checking additional work requires Room Next access/);
+    assert.doesNotMatch(narrowReplay.message, /room_check_access/);
+    assert.ok(!JSON.stringify(narrowReplay).includes(nextWorkItemId));
+  }
 
   const { tool, arguments: pickupArgs } = submitted.nextPickup;
   const pickup = reviewed((await f.rpc('tools/call', { name: tool, arguments: pickupArgs })).body);

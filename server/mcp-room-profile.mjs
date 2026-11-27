@@ -1382,7 +1382,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
               && (!oauthPrincipal || mcpOAuthToolAllowed("room_next", oauthPrincipal.scopes))) {
             value = { ...value, nextPickup: { tool: "room_next", arguments: { roomId: args.roomId, view: "pickup" } } };
           } else if (name === "room_submit_text_result") {
-            value = { ...value, message: value.message + " Checking additional work requires Room Next access. Use room_check_access to see authorized pickup actions." };
+            value = { ...value, message: value.message + " Checking additional work requires Room Next access." };
           }
         }
         return { jsonrpc: "2.0", id: requestId, result: toolResult(value, outcome.isError) };
