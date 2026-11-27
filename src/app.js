@@ -55,7 +55,7 @@ import { installWorkspaceNavigation, nameBeforeFirstRoom } from "./workspace-nav
 import { createAccountSettingsUI, applyStoredTheme, organizeRoomSettings, ACCOUNT_DELETED_MESSAGE } from "./account-settings-ui.js";
 import { createAuthSigninUI, classifyAuthLink } from "./auth-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, normalizeAgentInviteCode, agentInviteJoinPath } from "./invite-context.js";
-import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, roomIdFromNext, exactResultDestination, agentSigninRecord, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
+import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, roomIdFromNext, exactResultDestination, exactResultHref, agentSigninRecord, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
 import { rememberLastRoom, rememberAccountHint, readLastRoom, readAccountHint, hasSessionHint, clearBrowserSessionHints, rememberMemberRoom, readMemberRoom, clearStoredPasswords, signInRoomTarget } from "./browser-session.js";
 import { arrivalsNeedFileRefresh, attachFailureCopy, attachmentFromBytes, composerAudienceNote, composerAudiencePickerVisible, COMPOSER_FILE_BYTES, fileChipLabel, ROOM_FILE_REFRESH_DELAYS_MS } from "./composer-files.js";
@@ -1352,7 +1352,7 @@ async function ensureDefaultRoom() {
   })();
   return defaultRoomFlight;
 }
-async function openAccountRoom(roomId) {
+async function openAccountRoom(roomId, { result, stillOffered } = {}) {
   if (invitationIsCommitting() || signoutLoading) return;
   if (state?.room.id === roomId && session?.roomId === roomId) {
     // Returning to the same live session must not discard its drafts or retries.
@@ -1367,10 +1367,12 @@ async function openAccountRoom(roomId) {
   if (state && (drafts.hasText() || pendingAction || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending()
       || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || ownerOffersUI?.hasPending() || !$("#new-work-form").hidden)
       && !window.confirm("Switch rooms and clear unsent room drafts and pending retries? Saved work stays.")) return;
-  const owned = accountClient.session;
+  const owned = accountClient.session, from = session, previousHref = location.href;
   if (await confirmAccount() !== true || accountClient.session !== owned) return;
+  // Two different cross-Room links can return to the same current-Room URL.
+  if (result && (!stillOffered() || result.roomId !== roomId || session !== from || location.href !== previousHref)) return;
   accessEndContext = "accepted-room-switch"; client.endAccess();
-  history.replaceState(null, "", "?room=" + encodeURIComponent(roomId) + "#pr-view/rooms");
+  history.replaceState(null, "", result ? exactResultHref(result, location) : "?room=" + encodeURIComponent(roomId) + "#pr-view/rooms");
   try { await client.restore(roomId); }
   catch {
     if (accountClient.session !== owned) return;
@@ -1599,7 +1601,7 @@ function dialogNotice(statusSelector, text, error = false) {
   if (status?.closest("dialog")?.open) setFormStatus(status, text, error);
   else notice(text, error);
 }
-function notice(text, error = false) {
+function notice(text, error = false, action = null) {
   const status = $("#status"), version = ++noticeVersion;
   clearTimeout(noticeTimer); noticeTimer = null;
   const show = () => {
@@ -1609,6 +1611,14 @@ function notice(text, error = false) {
     const body = document.createElement("span");
     body.className = "status-text"; body.textContent = text;
     status.replaceChildren(body);
+    if (action) {
+      const button = document.createElement("button");
+      button.type = "button"; button.className = "button secondary";
+      button.textContent = action.label;
+      const stillOffered = () => version === noticeVersion;
+      button.addEventListener("click", () => { if (stillOffered()) action.run(stillOffered); });
+      status.append(button);
+    }
     if (error) {
       // Errors stay until dismissed or replaced so they can be read, selected and copied.
       const dismiss = document.createElement("button");
@@ -3991,8 +4001,16 @@ function revealLocationHash() {
   // JDOT-COH-NAV begin
   const linkedRoom = selectedRoomFromLocation();
   if (linkedRoom && linkedRoom !== session?.roomId) {
+    const account = accountClient.session, from = session;
     returnToCurrentRoom();
-    notice("That link belongs to another room. Open that room first.", true);
+    if (exactResult?.roomId === linkedRoom && account?.authenticated) {
+      notice(uiText("result.otherRoom"), true, {
+        label: uiText("result.openLinkedRoomResult"),
+        run: stillOffered => {
+          if (accountClient.session === account && session === from) void openAccountRoom(linkedRoom, { result: exactResult, stillOffered });
+        }
+      });
+    } else notice("That link belongs to another room. Open that room first.", true);
     return;
   }
   // JDOT-COH-NAV end
@@ -4006,6 +4024,7 @@ function revealLocationHash() {
       notice(uiText("result.invalidLink"), true);
       return;
     }
+    if ($("#main").hidden) workspaceUI?.showRooms();
     updatesUi?.close();
     if ($("#board-dialog").open) $("#board-dialog").close();
     openLinkedResult(exactResult);
