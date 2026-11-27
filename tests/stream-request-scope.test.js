@@ -36,7 +36,7 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
       command("add-" + memberId, "member.added", { memberId, displayName: memberId, kind: "agent", permissions: [] });
       keys[memberId] = store.issueAccessKey("commons", memberId);
     }
-    for (const [workItemId, accountableMemberId] of [["approved-work", "peer"], ["private-work", "owner"]]) {
+    for (const [workItemId, accountableMemberId] of [["approved-work", "peer"], ["private-work", "owner"], ["ready-work", "receiver"]]) {
       command("new-" + workItemId, "work.proposed", {
         workItemId, title: workItemId, definitionOfDone: "Select the exact request route.",
         accountableMemberId, mode: "read",
@@ -65,15 +65,19 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     const state = (token, workItemId = "approved-work") => fetch(origin + "/api/rooms/commons/state?" + new URLSearchParams({
       receiverMemberId: "receiver", receiverWorkItemId: workItemId
     }), { headers: { Authorization: "Bearer " + token } });
-    const dispatchState = async token => {
-      const response = await state(token);
+    const dispatchState = async (token, workItemId) => {
+      const response = await state(token, workItemId);
       assert.equal(response.status, 200, await response.clone().text());
       return (await response.json()).receiverAvailability;
     };
     const unconfirmed = { memberId: "receiver", workItemId: "approved-work", execution: "unverified",
       state: "readiness_unconfirmed", dispatch: "hold" };
     assert.deepEqual(await dispatchState(keys.owner), unconfirmed);
-    const advertised = { requesters: ["owner"], workItems: ["approved-work"], requests: ["private-source"] };
+    const readyWithoutReceiver = { ...unconfirmed, workItemId: "ready-work", state: "work_ready_receiver_unavailable",
+      label: "Work ready · receiver unavailable", blockerOwner: "host_connection" };
+    assert.deepEqual(await dispatchState(keys.owner, "ready-work"), readyWithoutReceiver);
+    assert.deepEqual(await dispatchState(keys.peer, "ready-work"), { ...unconfirmed, workItemId: "ready-work" });
+    const advertised = { requesters: ["owner"], workItems: ["approved-work", "ready-work"], requests: ["private-source"] };
     assert.equal((await preview(owner)).status, "unknown");
     const open = (token, scope, waitingForWork = false) => fetch(origin + "/api/rooms/commons/stream?after=" + sequence, {
       headers: { Authorization: "Bearer " + token, "X-Project-Room-Receiver-Scope": JSON.stringify(scope),
@@ -95,6 +99,7 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     assert.ok(Number.isFinite(Date.parse(availability.since)));
     assert.deepEqual(await dispatchState(keys.owner), { ...unconfirmed, state: "waiting_for_work",
       since: availability.since, dispatch: "check_existing_work" });
+    assert.equal((await dispatchState(keys.owner, "ready-work")).state, "waiting_for_work");
     assert.deepEqual(await dispatchState(keys.peer), unconfirmed, "out-of-scope members receive no waiting or scope details");
     assert.notEqual((await state(keys.peer, "private-work")).status, 200, "private Work is not a selectable readiness lane");
     assert.deepEqual(route, {
@@ -133,6 +138,8 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     assert.equal(stale.receiver, undefined, "a half-open receiver cannot keep its waiting status");
     assert.equal(ready(), false, "expired readiness cannot authorize dispatch");
     assert.deepEqual(await dispatchState(keys.owner), unconfirmed);
+    assert.deepEqual(await dispatchState(keys.owner, "ready-work"), readyWithoutReceiver);
+    assert.equal(store.headSequence("commons"), sequence, "read-time expiry preserves assignments without writes");
     assert.equal(server.hasRecoveryReceiver(exact, sequence, true), false, "expired scoped readiness is not a legacy receiver");
 
     clock = openedAt + 12_000;

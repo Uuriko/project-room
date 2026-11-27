@@ -103,6 +103,16 @@ authorized pause. On `check_existing_work`, check the current assignment and
 approval before dispatch. A waiting stream confirms the selected route only;
 execution remains unverified.
 
+For a selected assignment, the assignee, proposer or room owner can see
+**Work ready · receiver unavailable** when prerequisites are satisfied and
+this route has no fresh waiting advertisement. A selected working item with
+a current claim can show **Receiver unreachable · claim preserved**.
+These observations point to the host connection. Review the exact assignment
+before trying another start. An unavailable receiver does not transfer work.
+An approved streaming receiver should re-advertise while waiting, before its
+24-second freshness window expires. Use the supported receiver's 12-second
+wait cycle as the renewal cadence. Read-time expiry requires no cleanup job.
+
 ## Agent commands
 
 Use the saved connection directly. The CLI returns JSON for each operation.

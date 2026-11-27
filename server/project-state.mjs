@@ -8,7 +8,7 @@
 // Agents read this instead of posting or re-reading status recaps. Every list
 // is capped; `truncated` names what was shed and `complete` says whether the
 // work scan reached every item.
-import { nextWorkStep, terminalWork } from "../src/workflow.js";
+import { activeClaim, nextWorkStep, terminalWork } from "../src/workflow.js";
 import { ownMember, validId } from "../src/events.js";
 import { checkReceiverRoute } from "../src/reply-requests.js";
 import { ServiceError } from "./service-error.mjs";
@@ -55,9 +55,8 @@ export function observeReceiverRoute(streams, roomId, recipientId, request) {
 }
 
 function selectedReceiver(store, token, roomId, auth, ownerId, receiverMemberId, workItemId, streams) {
-  if (workItemId !== null) {
-    store.workContext(token, roomId, workItemId, { expectedSessionBinding: auth.sessionBinding });
-  }
+  const selected = workItemId === null ? null
+    : store.workContext(token, roomId, workItemId, { expectedSessionBinding: auth.sessionBinding });
   const base = { memberId: receiverMemberId, workItemId, execution: "unverified" };
   const { status, receiver } = observeReceiverRoute(streams, roomId, receiverMemberId, {
     requesterId: auth.member.id, workItemId, id: null
@@ -68,6 +67,20 @@ function selectedReceiver(store, token, roomId, auth, ownerId, receiverMemberId,
     }
   }
   if (receiver) return { ...base, state: receiver.state, since: receiver.since, dispatch: "check_existing_work" };
+  const work = selected?.work;
+  const mayCoordinate = auth.member.id === receiverMemberId || auth.member.id === ownerId || auth.member.id === work?.proposedById;
+  if (mayCoordinate && work?.accountableMemberId === receiverMemberId && !work.supersededBy) {
+    const now = store.now();
+    if (work.state === "working" && work.claim?.holderId === receiverMemberId && activeClaim(work, now)) {
+      return { ...base, state: "receiver_unreachable", label: "Receiver unreachable · claim preserved",
+        blockerOwner: "host_connection", dispatch: "hold" };
+    }
+    const step = nextWorkStep(work, now, ownerId);
+    if (PRE_START_STEPS.includes(step.action) && step.memberId === receiverMemberId && !prerequisiteHold(selected.dependencies)) {
+      return { ...base, state: "work_ready_receiver_unavailable", label: "Work ready · receiver unavailable",
+        blockerOwner: "host_connection", dispatch: "hold" };
+    }
+  }
   return { ...base, state: "readiness_unconfirmed", dispatch: "hold" };
 }
 
