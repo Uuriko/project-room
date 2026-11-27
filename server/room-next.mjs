@@ -199,14 +199,16 @@ function legacyRequestPage(store, secret, roomId, auth, room, cursor, preferReco
   };
 }
 
-function requestPage(store, roomId, auth, cursor) {
+function requestPage(store, roomId, auth, cursor, preferRecovery) {
   // A pickup cursor walks the current open inbox, not the historical request journal.
   const position = pageCursor(store, cursorBinding(auth, roomId, "incoming-open", null), cursor);
   if (!position) return unavailable(roomId, "requests", "cursor_changed");
   return withCurrentReadContext(store.db, roomId, budget => {
     const floor = readCurrentHistoryFloor(store.db, roomId, auth.member.id, budget);
-    const page = addressedRequestWindow(store, roomId, auth.member.id, position.after, PAGE_SIZE, budget);
-    const visible = page.requests.filter(request => messageInHistory({ id: request.id, createdAt: request.createdAt }, floor));
+    const loadWindow = after => addressedRequestWindow(store, roomId, auth.member.id, after, PAGE_SIZE, budget);
+    const isVisible = request => messageInHistory({ id: request.id, createdAt: request.createdAt }, floor);
+    const page = loadWindow(position.after);
+    const visible = page.requests.filter(isVisible);
     const event = store.db.prepare('SELECT sequence FROM events WHERE room_id=? AND id=?');
     let evaluatedThrough = 0;
     for (const request of visible) {
@@ -217,7 +219,23 @@ function requestPage(store, roomId, auth, cursor) {
         evaluatedThrough = Math.max(evaluatedThrough, row.sequence);
       }
     }
+    // Finish the ordinary page before spending its remaining read budget on
+    // an optional recovery hint. Failure to find a hint leaves paging intact.
+    let recovery;
+    if (preferRecovery && !cursor) {
+      try {
+        let window = page;
+        for (let n = 0; n <= WORK_SEARCH_WINDOWS; n++) {
+          recovery = window.requests.find(request => request.progressState === "error" && isVisible(request));
+          if (recovery || !window.hasMore || n === WORK_SEARCH_WINDOWS) break;
+          window = loadWindow(window.examinedAfter);
+        }
+      } catch (error) {
+        if (!(error instanceof CurrentReadBudgetExceeded)) throw error;
+      }
+    }
     return {
+      ...(recovery ? { recoveryRead: requestRead(roomId, recovery.id) } : {}),
       coverage: page.hasMore ? "partial" : "complete",
       evaluatedThrough,
       evaluationScope: "visible-encountered-anchors",
@@ -343,7 +361,7 @@ export function readRoomNext(store, secret, roomId, { source, cursor, view, cons
     let recoveryRead;
     if (includeRequests) {
       const { recoveryRead: recovery, ...requests } = boundedPage(roomId, "requests", () => current
-        ? requestPage(store, roomId, auth, cursor)
+        ? requestPage(store, roomId, auth, cursor, view === "pickup")
         : legacyRequestPage(store, secret, roomId, auth, room, cursor, view === "pickup"));
       packet.requests = requests;
       recoveryRead = recovery;

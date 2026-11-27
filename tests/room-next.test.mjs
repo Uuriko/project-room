@@ -298,11 +298,11 @@ test("composite OAuth scope admits only the combined read grant", () => {
   }
 });
 
-test("legacy pickup finds a failed formal request outside the first page without changing continuation", async t => {
-  const f = await privateWorkFixture(t, "legacy");
+async function checkFormalRequestRecovery(t, representation) {
+  const f = await privateWorkFixture(t, representation);
   f.store.dmConsents.request("commons", "owner", f.observer.id, "fixture");
   f.store.dmConsents.decide("commons", f.observer.id, "owner", "approve");
-  for (let i = 0; i < 19; i++) {
+  for (let i = 0; i < 22; i++) {
     f.send(f.owner, "message.posted", {
       messageId: `request-${String(i).padStart(2, "0")}`, toMemberId: f.observer.id, requestKind: "reply",
       body: "Inspect the original release result."
@@ -344,7 +344,34 @@ test("legacy pickup finds a failed formal request outside the first page without
   assert.deepEqual(closed.value.responseActions, []);
   const after = await f.mcp(f.observer, "room_next", { ...args, view: "pickup" });
   assert.notEqual(after.value.nextRead?.arguments?.requestMessageId, requestMessageId);
-});
+
+  if (representation === "normalized-current-v1") {
+    const laterId = "request-21";
+    f.send(f.observer.key, "reply_request.progressed", {
+      requestMessageId: laterId, expectedRequestRevision: 0,
+      progress: "error", note: "Receiver stopped on a later open request."
+    });
+    const ordinary = await f.mcp(f.observer, "room_next", args);
+    const pickup = await f.mcp(f.observer, "room_next", { ...args, view: "pickup" });
+    const withoutCursor = ({ nextRead, ...rows }) => rows;
+    assert.deepEqual(withoutCursor(pickup.value.requests), withoutCursor(ordinary.value.requests));
+    assert.equal(pickup.value.requests.coverage, "partial");
+    assert.notEqual(pickup.value.nextRead.arguments.requestMessageId, laterId);
+    let page = pickup.value.requests;
+    while (page.nextRead) {
+      const next = page.nextRead;
+      const result = await f.mcp(f.observer, next.tool, next.arguments);
+      assert.equal(result.ok, true, result.text);
+      page = result.value.requests;
+    }
+    assert.equal(page.items.find(row => row.id === laterId)?.latestRecipientProgress?.state, "error");
+  }
+}
+
+for (const representation of ["legacy", "normalized-current-v1"]) {
+  test(`pickup finds a failed formal request outside the first page without changing continuation (${representation})`,
+    t => checkFormalRequestRecovery(t, representation));
+}
 
 test("formal requests paginate independently with no work, and closed requests cannot be answered", async t => {
   const f = await privateWorkFixture(t, "normalized-current-v1");
