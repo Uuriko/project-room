@@ -4,7 +4,7 @@ import { createResultComparison } from "../src/result-comparison.js";
 import "../src/vendor-jsdiff-patch.js";
 
 function fixture() {
-  const pending = [], state = { messages: [] };
+  const pending = [], rejected = [], state = { messages: [] };
   const box = {
     hidden: true,
     ownerDocument: { createElement: () => ({
@@ -35,7 +35,7 @@ function fixture() {
     },
   };
   const controller = createResultComparison({ getState: () => state,
-    client: { workResult: () => new Promise(resolve => pending.push(resolve)) },
+    client: { workResult: () => new Promise((resolve, reject) => { pending.push(resolve); rejected.push(reject); }) },
     esc: text => String(text).replaceAll("<", "&lt;").replaceAll(">", "&gt;") });
   const respond = (index, body = "old") => pending[index]({ result: { receipt: { eventId: "previous" }, text: { messageId: "old-message", body } } });
   const open = () => {
@@ -46,7 +46,7 @@ function fixture() {
     controller.load("work", "previous", { messageId: "current", body }, box, () => true);
     if (compare) open();
   };
-  return { controller, state, box, respond, load, open, pending };
+  return { controller, state, box, respond, load, open, pending, rejected };
 }
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
@@ -57,6 +57,16 @@ test("the closed comparison leaves the earlier result unread", async () => {
   assert.equal(f.pending.length, 1);
   f.respond(0); await settle();
   assert.match(f.box.innerHTML, /revised/);
+});
+
+test("a refused comparison offers no retry and cannot restart when reopened", async () => {
+  const f = fixture(); f.load();
+  f.rejected[0](Object.assign(new Error("Read refused"), { status: 403 }));
+  await settle();
+  assert.match(f.box.innerHTML, /could not be loaded/);
+  assert.ok(!f.box.content.children.some(node => node.textContent === "Retry comparison"));
+  f.open();
+  assert.equal(f.pending.length, 1);
 });
 
 test("cleared or replaced comparisons ignore late reads", async () => {

@@ -500,6 +500,7 @@ export default {
   "result.openEarlier": "Open earlier result",
   "result.compareVersions": "Compare versions",
   "result.loadingComparison": "Loading previous version…",
+  "result.retryComparison": "Retry comparison",
   "result.download": "Download",
   "result.copied": "Copied",
   "result.copyFailed": "Could not copy. Retry or download the text.",

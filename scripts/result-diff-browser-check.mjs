@@ -196,12 +196,34 @@ for (const browserType of [chromium, webkit]) test(`a coworker can open the link
   assert.ok(resultBox && actionBox && compareBox);
   assert.ok(resultBox.y + resultBox.height <= actionBox.y && actionBox.y + actionBox.height + 4 <= compareBox.y,
     "the exact result comes before the review action and the optional comparison follows");
-  await reviewAction.focus();
-  await page.keyboard.press("Tab");
+  assert.equal(await page.locator("#result-title").evaluate(node => node === document.activeElement), true);
+  const nextControl = browserType === webkit ? "Alt+Tab" : "Tab";
+  const focusTrail = [];
+  for (let i = 0; i < 8 && !(await reviewAction.evaluate(node => node === document.activeElement)); i++) {
+    await page.keyboard.press(nextControl);
+    focusTrail.push(await page.evaluate(() => document.activeElement?.id || document.activeElement?.nodeName));
+  }
+  assert.equal(await reviewAction.evaluate(node => node === document.activeElement), true,
+    `Tab reaches review from the reader heading (${focusTrail.join(", ")})`);
+  await page.keyboard.press(nextControl);
   assert.equal(await comparison.locator("summary").evaluate(node => node === document.activeElement), true);
+  await page.route("**/work-result?**", async route => {
+    if (new URL(route.request().url()).searchParams.get("completionEventId") !== first.event.id) return route.continue();
+    await route.fulfill({ status: 503, json: { error: { code: "temporary_unavailable" } } });
+    await page.unroute("**/work-result?**");
+  });
   await comparison.locator("summary").press("Enter");
+  await comparison.getByText("The earlier version could not be loaded for comparison.", { exact: false }).waitFor();
+  assert.equal(previousReads().length, 1, "a failed comparison does not retry on its own");
+  assert.equal(await page.locator("#result-body").textContent(), "Release owner: Maya");
+  assert.equal(await reviewAction.isVisible(), true);
+  if (process.env.ROOM_CROSS_RESULT_CAPTURE) await page.screenshot({
+    path: process.env.ROOM_CROSS_RESULT_CAPTURE + "-retry-" + browserType.name() + ".png"
+  });
+  await comparison.getByRole("button", { name: "Retry comparison", exact: true }).press("Enter", { timeout: 1500 });
   await comparison.getByText("- Release owner missing", { exact: true }).waitFor();
-  assert.equal(previousReads().length, 1, "explicit comparison reads the previous pinned completion once");
+  assert.equal(previousReads().length, 2, "explicit retry reads the same pinned completion once more");
+  assert.equal(await comparison.locator("summary").evaluate(node => node === document.activeElement), true);
   if (process.env.ROOM_CROSS_RESULT_CAPTURE) await page.screenshot({
     path: process.env.ROOM_CROSS_RESULT_CAPTURE + "-result-" + browserType.name() + ".png"
   });
@@ -400,8 +422,9 @@ test("a returning reviewer can finish the correction from the original link afte
   assert.equal(f.item().decision.decision, "approved");
 });
 
-for (const withdraw of [false, true]) test(`late previous-result read respects ${withdraw ? "withdrawal" : "review cancellation"}`, { timeout: 30000 }, async t => {
-  const f = await setup(t, 1440);
+for (const [withdraw, width, browserType] of [[false, 1440, chromium], [true, 1440, chromium], [true, 390, webkit]])
+test(`late previous-result read respects ${withdraw ? "withdrawal" : "review cancellation"} at ${width}px`, { timeout: 30000 }, async t => {
+  const f = await setup(t, width, { browserType });
   f.send("human-checker", T.VERIFICATION_RECORDED, { workItemId: f.item().id,
     expectedRevision: f.item().revision, completionEventId: f.first.event.id, evidenceVersion: f.first.event.data.evidenceVersion,
     result: "fail", summary: "Name the owner before approval." });
@@ -432,6 +455,7 @@ for (const withdraw of [false, true]) test(`late previous-result read respects $
     release();
     await comparison.getByText("A version was withdrawn", { exact: false }).waitFor();
     assert.equal(await comparison.getByRole("link").count(), 0);
+    assert.equal(await comparison.getByRole("button", { name: "Retry comparison", exact: true }).count(), 0);
     assert.doesNotMatch(await comparison.textContent(), /Result A|Name the owner before approval/);
     assert.equal(await page.locator("#action-text-body").textContent(), revisedBody);
     await review(page, "pass", "Checked the owner on the current result.");

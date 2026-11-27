@@ -102,13 +102,13 @@ export function createResultComparison({ client, getState, esc }) {
     syncResultComparisons();
     const current = () => !comparison.withdrawn && owns() && resultComparisons.get(box) === comparison;
     let requested = false;
-    disclosure.addEventListener("toggle", async () => {
+    async function readEarlierVersion() {
       if (!disclosure.open || requested || !current()) return;
       requested = true;
       const loading = document.createElement("p");
       loading.setAttribute("role", "status");
       loading.textContent = uiText("result.loadingComparison");
-      content.append(loading);
+      content.replaceChildren(loading);
       try {
         const [previous, { structuredPatch }] = await Promise.all([
           client.workResult(workItemId, { completionEventId: previousId }), import("./vendor-jsdiff-patch.js")
@@ -154,11 +154,25 @@ export function createResultComparison({ client, getState, esc }) {
             syncResultComparisons();
           }
         }
-      } catch {
+      } catch (error) {
         if (!current()) return;
         content.innerHTML = `<p class="form-hint"><strong>Resubmitted result.</strong> The earlier version could not be loaded for comparison. Previous approval never carries over; review the exact new text.</p>`;
+        if (error?.code === "request_timeout" || (error?.status >= 500 && error.status < 600) || error instanceof TypeError) {
+          const retry = document.createElement("button");
+          retry.type = "button";
+          retry.className = "button";
+          retry.textContent = uiText("result.retryComparison");
+          retry.addEventListener("click", () => {
+            if (!disclosure.open || !current()) return;
+            requested = false;
+            summary.focus({ preventScroll: true });
+            void readEarlierVersion();
+          }, { once: true });
+          content.append(retry);
+        }
       }
-    });
+    }
+    disclosure.addEventListener("toggle", readEarlierVersion);
   }
   return { clear: clearResultComparison, sync: syncResultComparisons, load: loadResultComparison };
 }
