@@ -270,7 +270,7 @@ jobs:
   browser-shards:
     name: browser shard ${{ matrix.shard }}/6
     needs: changes
-    # Pull requests run the affected scripts. Main, the merge queue, schedule,
+    # Pull requests narrow only when the selector can prove scope. Main, the merge queue, schedule,
     # and workflow_dispatch run the full suite. Skip only when the merge-base
     # diff explicitly does not touch browser paths.
     if: always() && !cancelled() && (github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land'))) && needs.changes.outputs.docs_only != 'true' && (needs.changes.result != 'success' || needs.changes.outputs.browser != 'false')
@@ -520,7 +520,8 @@ jobs:
     # the root suite needs the same Native archive runtime as unit. It points TMPDIR
     # at a worktree-local .tmp/ and writes coverage data to ./coverage/
     # (both gitignored) by itself.
-    runs-on: ubuntu-latest
+    # Qualify OS upgrades with the existing Bubblewrap namespace probe first.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
