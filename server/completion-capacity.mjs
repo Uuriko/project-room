@@ -88,7 +88,7 @@ export function compileIdleRefill(route, result = null) {
     requestId: operation, toMemberId: recipientId, workItemId,
     body: [route.firstLine ?? `@(${recipientId})`, ...(discover === true ? [
       investigation,
-      "Check room_next or room_list_work for authorized work before investigating. If you already have work, continue it and close this request with its ID.",
+      "Check room_next or room_list_work for authorized work before investigating. Read a Work Thread that says check_prerequisites to find its exact next step. Preserve work waiting on a visible unfinished prerequisite and keep checking. If an assignment is ready or its readiness cannot be verified, stop this investigation and report the assignment.",
       result
         ? `Before investigating, call room_read_result with workItemId=${result.workItemId} and completionEventId=${result.completionEventId}. Proceed only if selection.status is current, current.next.action is complete, scope.workVisibility is room, and the evidence is available. If the read is denied, stale, superseded, withdrawn, or still awaiting a gate, settle this request as no longer eligible and stop. Do not substitute another source.`
         : "Otherwise inspect one public or explicitly shared source in this lane for a current issue.",
@@ -104,7 +104,7 @@ export function idleRefill(store, { route, secret, refill, hasOpenRequest }, rec
     const pause = store.wakeQueue.pauseStatus(roomId, recipientId);
     if (pause) return { state: reportsCapacityStop(pause.reason) ? "capacity_blocked" : "paused" };
     if (hasOpenRequest(route)) return { state: "pending_work" };
-    const availability = recipientWorkAvailability(store, roomId, recipientId);
+    const availability = recipientWorkAvailability(store, roomId, recipientId, { allowWaiting: route.idleRefill.discover === true });
     if (availability !== "clear") return { state: availability };
     const seed = store.operationReceipt(secret, roomId, refill.id);
     const result = seed.status === "recorded" && seed.eventType === "message.posted"

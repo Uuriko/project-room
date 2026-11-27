@@ -9,13 +9,14 @@ import { setImmediate } from "node:timers/promises";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { buildReplyCommand } from "../client/reply-actions.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { CAPACITY_STOP, compileCapacityWork, capacityWorkHandoff } from "../server/completion-capacity.mjs";
+import { CAPACITY_STOP, compileCapacityWork, capacityWorkHandoff, compileIdleRefill, idleRefill } from "../server/completion-capacity.mjs";
 import { startCompletionPickup, startReloadableCompletionPickup } from "../server/completion-pickup.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { atomicPrivateJson } from "../room-acp/src/private-files.mjs";
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
 import { textVersion } from "../server/text-results.mjs";
+import { createWork } from "../server/work-claims.mjs";
 
 async function checkScopedInvestigation(t, firstLine) {
   const f = createAcceptanceFixture(), roomId = "commons", workItemId = "qa-work", recipientId = "pickup-reviewer";
@@ -705,6 +706,74 @@ for (const representation of [undefined, "normalized-current-v1"]) for (const in
     assert.equal(receipt("progressed-alternate").status, "not_recorded");
     assert.equal(store.replyRequests.selected(owner, roomId, progressId).request.status, "open");
 
+  });
+}
+
+for (const representation of [undefined, "normalized-current-v1"]) {
+  test(`verified prerequisites distinguish waiting from runnable work (${representation ?? "legacy"})`, t => {
+    const store = new RoomStore(":memory:");
+    t.after(() => store.close());
+    const roomId = "commons", requesterId = "owner", recipientId = "recipient";
+    const workItemId = "setup-review", prerequisite = "install-notes", successor = "verify-install";
+    store.initialize(initialRoom(), representation ? { representation } : {});
+    const owner = store.issueAccessKey(roomId, requesterId);
+    const recipient = store.identities.create("Install reviewer");
+    linkWithProof(store, owner, roomId, recipient, { memberId: recipientId, permissions: ["accept_work"] });
+    const send = (secret, type, data) => store.command(secret, roomId, { id: randomUUID(), type, data });
+    const propose = (id, accountableMemberId, dependsOn = []) => send(owner, "work.proposed", {
+      workItemId: id, title: id, definitionOfDone: "Return the current installation evidence.",
+      accountableMemberId, dependsOn, mode: "read"
+    });
+    propose(workItemId, requesterId);
+    const definePrerequisite = id => {
+      propose(id, requesterId);
+      if (!representation) store.workClaims.set(roomId, createWork({ id, workItemId: id, title: id },
+        { agentId: requesterId, now: store.now() }));
+    };
+    definePrerequisite(prerequisite);
+    propose(successor, recipientId, [prerequisite]);
+    send(recipient.secret, "work.accepted", { workItemId: successor, expectedRevision: 0 });
+    const route = { roomId, requesterId, recipientId, workItemId, after: 0,
+      idleRefill: { requestId: "check-other-source", discover: true } };
+    const refill = compileIdleRefill(route);
+    const attempt = id => {
+      const nextRoute = { ...route, idleRefill: { ...route.idleRefill, requestId: id } };
+      return idleRefill(store, { route: nextRoute, secret: owner, refill: compileIdleRefill(nextRoute),
+        hasOpenRequest: () => false }, { hasRecoveryReceiver: () => true });
+    };
+    const current = () => store.workContext(recipient.secret, roomId, successor);
+    assert.equal(current().next.action, "wait_prerequisites");
+    assert.equal(attempt(refill.id).state, "refill_requested");
+    assert.equal(current().next.action, "wait_prerequisites", "discovery preserves the original assignment");
+    assert.equal(attempt(refill.id).state, "no_work_ready");
+
+    send(owner, "work.accepted", { workItemId: prerequisite, expectedRevision: 0 });
+    send(owner, "work.started", { workItemId: prerequisite, expectedRevision: 1 });
+    const body = "Installation notes verified.";
+    const evidence = send(owner, "message.posted", { messageId: "install-evidence", body, workItemId: prerequisite });
+    send(owner, "work.completed", { workItemId: prerequisite, expectedRevision: 2,
+      evidenceKind: "room_text", evidenceMessageId: "install-evidence", evidenceMessageEventId: evidence.event.id,
+      evidenceVersion: textVersion(body), previousCompletionEventId: null, producerId: requesterId,
+      summary: "Verified", nextAction: "Review installation", checksClaimed: ["docs"] });
+    if (!representation) store.workClaims.set(roomId, { ...store.workClaims.get(roomId, prerequisite), state: "done" });
+    assert.equal(current().next.action, "start");
+    assert.equal(attempt("check-after-unblock").state, "pending_work");
+    assert.equal(store.operationReceipt(owner, roomId, "check-after-unblock").status, "not_recorded");
+
+    send(owner, "work.superseded", { workItemId: successor, expectedRevision: 1, supersededByWorkItemId: workItemId,
+      reason: "Use the new install review." });
+    const hidden = "private-install-notes", other = "review-restricted-install";
+    definePrerequisite(hidden);
+    const coworker = store.identities.create("Installation note author");
+    linkWithProof(store, owner, roomId, coworker, { memberId: "author", permissions: ["accept_work"] });
+    store.command(owner, roomId, buildReplyCommand({ roomId, memberId: requesterId }, "room_request_reply", {
+      requestId: "private-install-review", toMemberId: "author", workItemId: hidden, body: "Verify the private setup."
+    }));
+    propose(other, recipientId, [hidden]);
+    send(recipient.secret, "work.accepted", { workItemId: other, expectedRevision: 0 });
+    assert.equal(store.workContext(recipient.secret, roomId, other).dependencies[0].state, "unknown");
+    assert.equal(attempt("check-with-private-prerequisite").state, "pending_work");
+    assert.equal(store.operationReceipt(owner, roomId, "check-with-private-prerequisite").status, "not_recorded");
   });
 }
 

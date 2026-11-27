@@ -6667,6 +6667,25 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return digest;
     });
   }
+  selectedWorkPrerequisites(roomId, item, viewerId, now, current) {
+    const ids = (current ? null : this.workClaims.get(roomId, boardClaimId(item.id))?.dependsOn) ?? item.dependsOn ?? [];
+    if (current && ids.length > 16) fail(409, "current_room_context_unavailable", "Selected dependency list exceeds bounded context");
+    const dependencies = ids.map(id => {
+      if (current) {
+        const work = readWorkItem(this.db, roomId, id);
+        return { id, workId: work?.id, work, state: nativePrerequisiteState(work, now) };
+      }
+      const claim = this.workClaims.get(roomId, id);
+      return { id, workId: claim?.workItemId, state: boardPrerequisiteState(claim) };
+    });
+    const workIds = dependencies.map(dep => dep.workId).filter(Boolean);
+    const parties = workIds.length ? this.privateWorkParties(roomId, { workIds }) : new Map();
+    return dependencies.map(({ id, workId, work, state }) => {
+      const allowed = parties.get(workId);
+      const withheld = allowed && outsidePrivateWork(allowed, work ?? readWorkItem(this.db, roomId, workId), viewerId);
+      return { id, ...(withheld ? { state: "unknown", satisfied: false } : state) };
+    });
+  }
   workContext(token, roomId, workItemId, { includeSource = false, includeOffers = false, sourceObservation = undefined, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => withCurrentReadContext(this.db,roomId,() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
@@ -6679,16 +6698,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if(!Object.hasOwn(current.state.workItems,workItemId))fail(404,'work_not_found','Work item not found in this Room');
         const item=current.state.workItems[workItemId],target=item.supersededBy;
         assertSelectedWorkVisible(this,roomId,workItemId,item,auth.member.id,current.privateParties);
-        const ids=item.dependsOn??[];
-        if(ids.length>16)fail(409,'current_room_context_unavailable','Selected dependency list exceeds bounded context');
         const now=this.now();
-        const dependencies=ids.map(id=>{
-          const dep=readWorkItem(this.db,roomId,id);
-          const parties=dep ? this.privateWorkParties(roomId,{workIds:[id]}).get(id) : null;
-          const state=outsidePrivateWork(parties,dep,auth.member.id)
-            ? {state:'unknown',satisfied:false} : nativePrerequisiteState(dep,now);
-          return {id,...state};
-        });
+        const dependencies=this.selectedWorkPrerequisites(roomId,item,auth.member.id,now,true);
         const value=selectedWorkContext({state:current.state,workItemId,viewerId:auth.member.id,sequence:current.sequence,now,includeSource,includeOffers,sourceObservation,dependencies,
           floor:this.historyFloor(roomId,auth.member.id,current.sequence),messageRecords:{get:id=>selectedMessageRecord(this,roomId,id,false)},
           replacementAvailable:validId(target)&&target!==workItemId&&Boolean(readWorkItem(this.db,roomId,target))});
@@ -6718,16 +6729,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const room = { sequence: row.sequence, state }, now = this.now();
       if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
       assertSelectedWorkVisible(this, roomId, workItemId, room.state.workItems[workItemId], auth.member.id);
-      const ids = this.workClaims.get(roomId, boardClaimId(workItemId))?.dependsOn ?? room.state.workItems[workItemId].dependsOn ?? [];
-      const parties = ids.length ? this.privateWorkParties(roomId) : new Map();
-      const dependencies = ids.map(id => {
-        const dep = this.workClaims.get(roomId, id);
-        const workId = dep?.workItemId;
-        const allowed = workId ? parties.get(workId) : null;
-        const state = allowed && outsidePrivateWork(allowed, readWorkItem(this.db, roomId, workId), auth.member.id)
-          ? { state: "unknown", satisfied: false } : boardPrerequisiteState(dep);
-        return { id, ...state };
-      });
+      const dependencies = this.selectedWorkPrerequisites(roomId, room.state.workItems[workItemId], auth.member.id, now, false);
       const pullRequest = threadGithubAttachment(this, roomId, workItemId);
       return { ...selectedWorkContext({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence, now, includeSource, includeOffers, sourceObservation, dependencies, messageRecords: { get: id => selectedMessageRecord(this, roomId, id, Boolean(messagesArchive)) },
         floor: this.historyFloor(roomId, auth.member.id, room.sequence),
