@@ -248,7 +248,7 @@ function addressedWorkPage(store, roomId, auth, room, current, cursor) {
 
 // The dispatcher needs only an occupancy verdict while it holds its write
 // transaction. Do not expose another member's Work Threads or issue a cursor.
-export function recipientWorkAvailability(store, roomId, memberId) {
+export function recipientWorkAvailability(store, roomId, memberId, { allowWaiting = false } = {}) {
   const { db } = store;
   const current = isCurrentRoom(db, roomId);
   const { room, member } = current ? withCurrentReadContext(db, roomId, budget => ({
@@ -262,7 +262,24 @@ export function recipientWorkAvailability(store, roomId, memberId) {
   };
   if (!room || !member || member.active === false) return "work_unconfirmed";
   const page = addressedWorkPage(store, roomId, { member }, room, current);
-  if (page.items.length) return "pending_work";
+  if (page.items.length) {
+    if (!allowWaiting) return "pending_work";
+    try {
+      const now = store.now();
+      const allWaiting = withCurrentReadContext(db, roomId, () => page.items.every(row => {
+        if (row.reason !== "check_prerequisites") return false;
+        const item = readWorkItem(db, roomId, row.id);
+        if (item?.state !== "accepted" || item.revision !== row.revision) return false;
+        const unmet = store.selectedWorkPrerequisites(roomId, item, memberId, now, current)
+          .filter(dependency => !dependency.satisfied);
+        return unmet.length > 0 && unmet.every(({ state }) => !["unknown", "missing", "closed"].includes(state));
+      }), { maxRecords: 512 });
+      if (!allWaiting) return "pending_work";
+    } catch (error) {
+      if (error.code !== "current_room_context_unavailable") throw error;
+      return "work_unconfirmed";
+    }
+  }
   return page.coverage === "complete" ? "clear" : "work_unconfirmed";
 }
 
