@@ -362,6 +362,23 @@ test("room plan previews offline and reuses a partially recorded QA batch after 
   const input = { planId: "qa", items: [
     row("onboarding", producer.identityId), row("correction", reviewer.identityId), row("resume", producer.identityId)
   ] };
+  const wrongDirectory = connectionHome("wrong-planner", env);
+  saveAgentConnection(wrongDirectory, {
+    version: 1, origin, roomId: "commons", memberId: producer.identityId, token: planner.secret
+  });
+  writePointer("wrong-planner", wrongDirectory, env);
+  const wrongProject = join(home, "wrong-planner-project");
+  writeProject(wrongProject, { connection: "wrong-planner" });
+  let mismatchedWrites = 0;
+  await assert.rejects(cli(["plan", "--submit"], input, wrongProject, async (url, options) => {
+    if (options.method === "POST") mismatchedWrites += 1;
+    return fetch(url, options);
+  }), { code: "identity_mismatch" });
+  await assert.rejects(cli(["plan", "--submit"], input, home, async (url, options) => {
+    if (options.method === "POST") mismatchedWrites += 1;
+    return fetch(url, options);
+  }), /steer permission/);
+  assert.equal(mismatchedWrites, 0);
   const submitted = [];
   const preview = await cli(["plan", "--preview"], input, ownerProject, () => {
     throw new Error("Preview made a network request");

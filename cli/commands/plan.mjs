@@ -11,6 +11,11 @@ Use {"planId":"qa","items":[{"key":"onboarding","title":"Review onboarding","def
 Preview validates the file locally. After an uncertain submission, retry with the same file and connection.`;
 
 export async function recordWorkPlan(args, client, identity) {
+  const access = await client.checkConnection();
+  if (access.roomId !== identity.roomId || access.memberId !== identity.memberId
+      || !access.permissions.includes("steer")) {
+    throw new Error("Use the saved Room connection with steer permission to submit this plan.");
+  }
   return submitPlan(args, async step => {
     const command = buildWorkCommand(step.name, step.args);
     const receipt = await client.command(command);
