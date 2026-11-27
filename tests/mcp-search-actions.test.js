@@ -48,11 +48,15 @@ const size = tools => JSON.stringify(tools).length;
 test("lean is opt-in: default core completes work and full stays available, lean is short and much smaller", () => {
   const core = listedMcpTools("core"), full = listedMcpTools("full"), lean = listedMcpTools("lean");
   assert.equal(core.length, 29, "default core is 25 conversation, request and task tools plus four join readers");
-  assert.equal(full.length, 132, "full includes room_next and room_propose_plan");
-  assert.ok(full.some(tool => tool.name === "room_next"));
+  // The reviewed catalog snapshot owns exact membership. Check the profile's
+  // contract directly here so a reviewed addition does not change this test.
+  const fullNames = new Set(full.map(tool => tool.name));
+  for (const tool of core) assert.ok(fullNames.has(tool.name), `full retains core tool ${tool.name}`);
+  for (const name of ["room_propose_plan", "room_wait_for_attention"]) {
+    assert.ok(fullNames.has(name), `full lists ${name}`);
+  }
   assert.equal(core[0].name, "room_next");
-  assert.ok(full.some(tool => tool.name === "room_wait_for_attention"));
-  assert.equal(new Set(full.map(tool => tool.name)).size, full.length, "full names remain unique");
+  assert.equal(fullNames.size, full.length, "full names remain unique");
   assert.ok(!core.some(tool => tool.name === "room_search_actions"), "meta tools are not added to core");
   const names = lean.map(tool => tool.name);
   for (const name of LEAN_MCP_TOOLS) assert.ok(names.includes(name), `lean lists ${name}`);
