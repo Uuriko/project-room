@@ -991,8 +991,23 @@ for (const normalized of [false, true]) test(`OAuth callback can use its suggest
   assert.equal(before.ifIdle?.investigation, undefined);
   const ask = await call(before.nextRead.tool, before.nextRead.arguments);
   const answer = ask.responseActions.find(action => action.arguments.responseOutcome === 'answered');
-  await call(answer.tool, { ...answer.arguments, requestId: 'answer-callback', body: 'Current notes checked.' });
-  let pickup = await call('room_next', { view: 'pickup' });
+  const responseArgs = { ...answer.arguments, requestId: 'answer-callback', body: 'Current notes checked.' };
+  const receipt = await call(answer.tool, responseArgs);
+  assert.equal(receipt.next.tool, 'room_read_request');
+  assert.deepEqual(receipt.nextPickup, { tool: 'room_next', arguments: { roomId, view: 'pickup' } });
+  const replay = await call(answer.tool, responseArgs);
+  assert.equal(replay.duplicate, true);
+  assert.deepEqual(replay.nextPickup, receipt.nextPickup);
+
+  const narrowConsent = await f.consent({ scope: 'rooms:read chat:read chat:write' });
+  const code = new URL(narrowConsent.headers.get('location')).searchParams.get('code');
+  const tokens = await f.exchange({ grant_type: 'authorization_code', code, client_id: CLIENT.clientId,
+    redirect_uri: CLIENT.redirectUris[0], code_verifier: verifier, resource });
+  const narrow = reviewed((await f.rpc('tools/call', { name: answer.tool, arguments: responseArgs }, (await tokens.json()).access_token)).body);
+  assert.equal(narrow.duplicate, true);
+  assert.equal(narrow.nextPickup, undefined);
+
+  let pickup = await call(receipt.nextPickup.tool, receipt.nextPickup.arguments);
   while (pickup.nextRead?.tool === 'room_next') pickup = await call(pickup.nextRead.tool, pickup.nextRead.arguments);
   const lead = pickup.ifIdle.investigation;
   assert.ok(lead);

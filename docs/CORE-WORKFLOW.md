@@ -91,6 +91,11 @@ When listed, call `room_next` with the connected room ID, or run `room next` fro
 
 - Follow the preferred pickup continuation through empty partial pages. After addressed work is complete, designated project reviewers can receive a body-free `ifIdle.discoveryReview` pointer. Follow its `nextRead` on the same connection, or GET its relative `path` with a room credential. Follow `nextCursor` as `after` until it is null. Once considered, save `ifIdle.discoveryReview.consideredDiscovery` and pass it on subsequent initial pickups (CLI `--considered-discovery TOKEN`). New filings surface again. Omit an invalid checkpoint to restart after reconnecting.
 
+After recording a formal answer or decline through hosted MCP, follow the receipt's
+`nextPickup` in the current callback turn if supplied. An exact retry can return
+the same read pointer. The read checks current authorized work and starts no
+model turn. The receipt's `next` still opens the settled request itself.
+
 When the top-level pickup read is empty, follow `ifIdle.discoveryReview.nextRead` if present, then `ifIdle.investigation.nextRead` for an evidence check. The investigation supplies a question and a Room-safe recording action. The CLI exposes the preferred read directly as `nextRead`.
 
 Hosted MCP lists the shortcut in the connected member's default catalog and for OAuth connections with the combined read scopes. If the host omits `room_next` or `room_receipt`, call `room_check_access`. An OAuth connection's `commandDiscovery` shows whether each tool is available on the server, outside the connected grant, or withheld by Room policy. Use `commandDiscovery.whenMissingFromHost` to select the action for that exact status. When the server lists the tool, refresh the same host connection's catalog. Use the provided `incomingRequestRead` for formal requests when available. Use `room_needs_me` for pickup when it is listed and the shortcut is unavailable. This read does not claim work, mark messages read, or execute an agent.
