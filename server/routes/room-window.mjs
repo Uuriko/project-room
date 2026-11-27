@@ -67,8 +67,9 @@ export function readRequestRoute(ctx) {
       || entry.res.destroyed || entry.res.writableEnded) continue;
     if (checkReceiverRoute(entry.receiverScope, request) === "matches_scope") {
       status = "matches_scope";
-      if (entry.receiverWaitingSince) {
-        receiver = { state: "waiting_for_work", since: entry.receiverWaitingSince };
+      const since = entry.receiverWaitingSince;
+      if (since && entry.stillAuthorized()) {
+        receiver = { state: "waiting_for_work", since };
         break;
       }
       continue;
