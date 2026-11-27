@@ -430,8 +430,10 @@ for (const outcome of ["success", "failure"]) {
       await page.waitForFunction(() => document.querySelector("#rb-current-boundary").textContent.includes("as of event"));
     };
     await page.goto(origin); await enter();
-    // Entering the room loads the data but leaves Catch up closed.
+    // Let the automatic refresh on opening Catch up finish before intercepting the manual refresh.
+    const initialBrief = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/return-brief"));
     await openCatchUp(page);
+    await initialBrief;
     await page.waitForFunction(() => !document.querySelector("#rb-refresh-button").disabled);
     let release, arrived;
     const held = new Promise(resolve => arrived = resolve);

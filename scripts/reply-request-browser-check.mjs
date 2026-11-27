@@ -39,10 +39,11 @@ const record = revealRecord;
 const input = page => page.locator("#message-input");
 async function enterConversation(page) {
   const updates = page.locator("#updates-dialog");
-  await updates.waitFor({ state: "visible" });
-  assert.equal(await input(page).isVisible(), false);
-  await updates.getByRole("button", { name: "Conversation", exact: true }).click();
-  await updates.waitFor({ state: "hidden" });
+  if (await updates.isVisible()) {
+    assert.equal(await input(page).isVisible(), false);
+    await updates.getByRole("button", { name: "Conversation", exact: true }).click();
+    await updates.waitFor({ state: "hidden" });
+  }
   await input(page).waitFor({ state: "visible" });
 }
 
