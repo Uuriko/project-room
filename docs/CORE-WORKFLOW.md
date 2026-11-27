@@ -100,6 +100,10 @@ After recording a formal answer, decline or text result through hosted MCP,
 follow the receipt's `preparedPickup.nextRead` in the current turn if supplied.
 Use `nextPickup` when the prepared read is unavailable. Read the
 selected assignment and use its current Accept or Start action when eligible.
+After a text result, a complete empty pickup can carry a `supplyRequest`
+addressed to the proposer. Use it for one registered request for eligible
+follow-up work. Keep its operation ID on retry. Posting it requires the current
+chat write grant and its ordinary access checks.
 An exact submission retry can return the same pickup pointer. The read checks
 current authorized work and starts no model turn. The original receipt still
 points to the exact request or result.
