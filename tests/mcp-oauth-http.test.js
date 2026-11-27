@@ -741,6 +741,7 @@ for (const normalized of [false, true]) test(`OAuth work:write lifecycle fits th
   assert.equal(submitted.result.read.arguments.completionEventId, submitted.eventId);
   assert.deepEqual(submitted.nextPickup, { tool: 'room_next', arguments: { roomId: 'commons', view: 'pickup' } });
   assert.equal(submitted.preparedPickup.nextRead.arguments.workItemId, nextWorkItemId);
+  assert.equal(submitted.supplyRequest, undefined);
   const replay = await call('room_submit_text_result', submission);
   assert.equal(replay.duplicate, true);
   assert.equal(replay.eventId, submitted.eventId);
@@ -767,6 +768,29 @@ for (const normalized of [false, true]) test(`OAuth work:write lifecycle fits th
   assert.equal(next.continuation.arguments.workItemId, nextWorkItemId);
   await call('room_accept_work', { workItemId: nextWorkItemId, expectedRevision: 0, requestId: 'life-next-accept' });
   await call('room_start_work', { workItemId: nextWorkItemId, expectedRevision: 1, requestId: 'life-next-start' });
+  const secondText = 'Second result is ready';
+  const secondPost = await call('room_post_message', { workItemId: nextWorkItemId, body: secondText, id: 'life-next-result' });
+  const secondInput = {
+    workItemId: nextWorkItemId, expectedRevision: 2, evidenceMessageId: secondPost.command.data.messageId,
+    evidenceMessageEventId: secondPost.event.id, evidenceVersion: textVersionOf(secondText), previousCompletionEventId: null,
+    producerId: 'friend-dot', summary: 'Done', nextAction: 'Review', requestId: 'life-next-submit'
+  };
+  const completed = await call('room_submit_text_result', secondInput);
+  const { supplyRequest } = completed;
+  assert.equal(completed.preparedPickup.nextRead, null);
+  assert.equal(supplyRequest.arguments.toMemberId, 'owner');
+  assert.equal(supplyRequest.arguments.workItemId, nextWorkItemId);
+  assert.deepEqual((await call('room_submit_text_result', secondInput)).supplyRequest, supplyRequest);
+  const consent = await f.consent({ scope: 'rooms:read chat:read work:read work:write' });
+  const code = new URL(consent.headers.get('location')).searchParams.get('code');
+  const tokens = await f.exchange({ grant_type: 'authorization_code', code, client_id: CLIENT.clientId,
+    redirect_uri: CLIENT.redirectUris[0], code_verifier: verifier, resource });
+  assert.equal((await call('room_submit_text_result', secondInput, (await tokens.json()).access_token)).supplyRequest, undefined);
+  const opened = await call(supplyRequest.tool, supplyRequest.arguments);
+  const repeated = await call(supplyRequest.tool, supplyRequest.arguments);
+  assert.equal(opened.status, 'recorded');
+  assert.equal(repeated.eventId, opened.eventId);
+  assert.equal(repeated.duplicate, true);
 
   const read = reviewed((await f.rpc('tools/call', { name: 'room_read_work', arguments: { workItemId, includeResult: true } })).body);
   assert.equal(read.work.state, 'completed');
