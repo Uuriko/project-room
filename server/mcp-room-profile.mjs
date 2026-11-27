@@ -1377,10 +1377,13 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
           value = { ...value, actions: [], actionAvailability: "outside_connected_grant" };
         }
         if ((name === "room_respond_to_request" || name === "room_submit_text_result")
-            && !outcome.isError && value.status === "recorded"
-            && mcpKeyGrantsScope(store, secret, "rooms:read")
-            && (!oauthPrincipal || mcpOAuthToolAllowed("room_next", oauthPrincipal.scopes))) {
-          value = { ...value, nextPickup: { tool: "room_next", arguments: { roomId: args.roomId, view: "pickup" } } };
+            && !outcome.isError && value.status === "recorded") {
+          if (mcpKeyGrantsScope(store, secret, "rooms:read")
+              && (!oauthPrincipal || mcpOAuthToolAllowed("room_next", oauthPrincipal.scopes))) {
+            value = { ...value, nextPickup: { tool: "room_next", arguments: { roomId: args.roomId, view: "pickup" } } };
+          } else if (name === "room_submit_text_result") {
+            value = { ...value, message: value.message + " Checking additional work requires Room Next access. Use room_check_access to see authorized pickup actions." };
+          }
         }
         return { jsonrpc: "2.0", id: requestId, result: toolResult(value, outcome.isError) };
       }

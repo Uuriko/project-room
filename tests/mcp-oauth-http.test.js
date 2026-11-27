@@ -738,6 +738,8 @@ for (const normalized of [false, true]) test(`OAuth work:write lifecycle fits th
   const narrowReplay = await call('room_submit_text_result', submission, (await narrowed.json()).access_token);
   assert.equal(narrowReplay.eventId, submitted.eventId);
   assert.equal(narrowReplay.nextPickup, undefined);
+  assert.match(narrowReplay.message, /Checking additional work requires Room Next access/);
+  assert.ok(!JSON.stringify(narrowReplay).includes(nextWorkItemId));
 
   const { tool, arguments: pickupArgs } = submitted.nextPickup;
   const pickup = reviewed((await f.rpc('tools/call', { name: tool, arguments: pickupArgs })).body);
