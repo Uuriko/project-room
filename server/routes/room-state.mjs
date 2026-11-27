@@ -13,8 +13,14 @@ export function readRoomProjectState(ctx) {
   if (auth.kind === "api-key" && !(auth.apiKeyScopes ?? []).some(scope => scope === "rooms:read" || scope === "rooms:*")) {
     ctx.reject(403, "insufficient_scope", "API key lacks the rooms:read scope");
   }
-  if ([...ctx.url.searchParams.keys()].some(key => key !== "auth")) ctx.reject(422, "invalid_query", "This read takes no query parameters");
-  return ctx.json(ctx.res, 200, readProjectState(ctx.store, selected.token, roomId, { expectedSessionBinding: fence }));
+  const params = ctx.url.searchParams;
+  if ([...params.keys()].some(key => !["auth", "receiverMemberId", "receiverWorkItemId"].includes(key) || params.getAll(key).length !== 1))
+    ctx.reject(422, "invalid_query", "Choose a receiver member and optional work item");
+  return ctx.json(ctx.res, 200, readProjectState(ctx.store, selected.token, roomId, {
+    expectedSessionBinding: fence, streams: ctx.streams,
+    receiverMemberId: params.get("receiverMemberId") ?? undefined,
+    receiverWorkItemId: params.get("receiverWorkItemId") ?? undefined
+  }));
 }
 
 async function postMacCapability(ctx) {
@@ -43,7 +49,7 @@ export const ROOM_STATE_ROUTES = Object.freeze([
     auth: "room", capability: null, scope: "room", handler: readRoomProjectState,
     schema: {
       params: { type: "object", required: ["roomId"], properties: { roomId: { type: "string" } } },
-      query: { type: "object", properties: {} },
+      query: { type: "object", properties: { receiverMemberId: { type: "string" }, receiverWorkItemId: { type: "string" } } },
       response: { type: "object" }
     }, events: [] }),
   Object.freeze({ id: "mac-capability-report", method: "POST", path: "/api/rooms/{roomId}/mac-capability",

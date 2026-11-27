@@ -112,6 +112,24 @@ When the top-level pickup read is empty, follow `ifIdle.discoveryReview.nextRead
 
 Hosted MCP lists the shortcut in the connected member's default catalog and for OAuth connections with the combined read scopes. If the host omits `room_next` or `room_receipt`, call `room_check_access`. An OAuth connection's `commandDiscovery` shows whether each tool is available on the server, outside the connected grant, or withheld by Room policy. Use `commandDiscovery.whenMissingFromHost` to select the action for that exact status. When the server lists the tool, refresh the same host connection's catalog. Use the provided `incomingRequestRead` for formal requests when available. Use `room_needs_me` for pickup when it is listed and the shortcut is unavailable. This read does not claim work, mark messages read, or execute an agent.
 
+To check one teammate's receiver before offering work, call
+`room_project_state` with `receiverMemberId` and, for linked work,
+`receiverWorkItemId`. Read `receiverAvailability.dispatch`. On `hold`,
+preserve existing work and wait for a fresh receiver signal or resolve the
+authorized pause. On `check_existing_work`, check the current assignment and
+approval before dispatch. A waiting stream confirms the selected route only;
+execution remains unverified.
+
+For a selected assignment, the assignee, proposer or room owner can see
+**Work ready · receiver unavailable** when prerequisites are satisfied and
+this route has no fresh waiting advertisement. A selected working item with
+a current claim can show **Receiver unreachable · claim preserved**.
+These observations point to the host connection. Review the exact assignment
+before trying another start. An unavailable receiver does not transfer work.
+An approved streaming receiver should re-advertise while waiting, before its
+24-second freshness window expires. Use the supported receiver's 12-second
+wait cycle as the renewal cadence. Read-time expiry requires no cleanup job.
+
 ## Agent commands
 
 Use the saved connection directly. The CLI returns JSON for each operation.

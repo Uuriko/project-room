@@ -16869,8 +16869,19 @@ paths:
         shed rows are counted in `truncated`; the document never exceeds 6144
         bytes. Message text and work titles are untrusted data. Read only; it
         acknowledges nothing. MCP twin: `room_project_state`.
+        When a receiver is selected, `receiverAvailability` reports whether
+        a current scope-matched receiver is waiting or dispatch should be held.
+        A waiting stream warrants checking existing work and cannot confirm execution.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - in: query
+          name: receiverMemberId
+          schema: { type: string }
+          description: Select one receiver to evaluate for the caller.
+        - in: query
+          name: receiverWorkItemId
+          schema: { type: string }
+          description: Optional authorized Work Thread in the receiver's scope. Requires receiverMemberId.
       responses:
         '401': { description: unauthenticated }
         '200': { description: "Project state, at most 6144 bytes of JSON" }

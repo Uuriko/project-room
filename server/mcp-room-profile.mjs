@@ -2,7 +2,7 @@ import { answerFileSelection } from "../src/reply-requests.js";
 import { reviewerProjectDiscoveries } from './project-discoveries.mjs';
 import { readRoomNext, validRoomNextSelection } from "./room-next.mjs";
 import { withInviteShare } from "./invite-share.mjs";
-import { readProjectState } from "./project-state.mjs";
+import { readProjectState, validProjectReceiverSelection } from "./project-state.mjs";
 import { readResponseLatency } from "./response-latency.mjs";
 import { withMcpCallLog } from "./mcp-call-log.mjs";
 import {publishedLobbyContext} from './current-public-face.mjs';
@@ -235,7 +235,8 @@ function validRoomArgs(name, args) {
   if (name === "room_read_project_discoveries") return validId(args.offerId)
     && (args.after === undefined || typeof args.after === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(args.after))
     && (args.limit === undefined || Number.isInteger(args.limit) && args.limit >= 1 && args.limit <= 50);
-  if (name === "room_check_access" || name === "room_activation_pack" || name === "room_project_state" || name === "room_response_latency") return true;
+  if (name === "room_project_state") return validProjectReceiverSelection(args);
+  if (name === "room_check_access" || name === "room_activation_pack" || name === "room_response_latency") return true;
   if (name === "room_member_card") return validId(args.memberId);
   if (name === "squads_list") return true;
   if (name === "room_map") {
@@ -667,7 +668,10 @@ async function boardClaimCall(store, secret, name, args) {
 }
 
 function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, signal, oauthPrincipal, mcpUrl,
-  { addressedOnly = false, preferWork = false } = {}) {
+  { addressedOnly = false, preferWork = false, projectReceiverStreams } = {}) {
+  if (name === "room_project_state") {
+    return withContentTrust(readProjectState(store, secret, args.roomId, { ...args, streams: projectReceiverStreams?.() }));
+  }
   if (name === "room_receipt") return store.operationReceipt(secret, args.roomId, args.operationId);
   if (name === "room_next") return withContentTrust(readRoomNext(store, secret, args.roomId, args,
     addressedOnly ? null : () => listRoomWork(store, secret, { roomId: args.roomId, focus: "help_wanted", limit: 1 }),
@@ -819,7 +823,6 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, s
       : { roomId, since: digest.next ?? digest.through ?? args.since ?? 0 };
     return withContentTrust({ ...digest, nextRead: { tool: "room_digest", arguments: nextArguments, partial: Boolean(partial) } });
   }
-  if (name === "room_project_state") return withContentTrust(readProjectState(store, secret, roomId));
   if (name === "room_response_latency") return withContentTrust(readResponseLatency(store, secret, roomId));
   if (name === "room_member_card") {
     // plan-dir-card: the member chip's card over MCP. Same read as
@@ -1241,7 +1244,7 @@ function listSelection(message, searchParams) {
 
 const SUGGESTABLE_TOOLS = Object.freeze([...HOSTED_ROOM_MCP_TOOLS, ...PUBLIC_WORK_MCP_TOOLS, ...MCP_JOIN_TOOLS.map(entry => entry.name), ...ACTION_META_TOOL_NAMES]);
 
-async function handleAuthed(message, { store, secret, identity, mcpUrl, searchParams, agentRooms, spendCredential, oauthPrincipal = null, nativeEventsEnabled = false, nativeStatus, signal }) {
+async function handleAuthed(message, { store, secret, identity, mcpUrl, searchParams, agentRooms, spendCredential, oauthPrincipal = null, nativeEventsEnabled = false, nativeStatus, projectReceiverStreams, signal }) {
   const hasId = object(message) && Object.hasOwn(message, "id");
   const requestId = message?.id;
   if (!object(message) || message.jsonrpc !== "2.0" || typeof message.method !== "string"
@@ -1344,7 +1347,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         return mcpCallError(requestId, { reason: "unknown_tool", tool: args.name, suggestion: closestToolName(args.name, HOSTED_ROOM_MCP_TOOLS) });
       }
       return handleAuthed({ ...message, params: { name: inner, arguments: args.arguments ?? {} } },
-        { store, secret, identity, mcpUrl, searchParams, agentRooms, spendCredential, oauthPrincipal, nativeEventsEnabled, nativeStatus, signal });
+        { store, secret, identity, mcpUrl, searchParams, agentRooms, spendCredential, oauthPrincipal, nativeEventsEnabled, nativeStatus, projectReceiverStreams, signal });
     }
     // DC3-P3 (R1/R2), bounty_accept only: permission before shape at the
     // transport. A seat that may not accept this bounty gets the escrow
@@ -1453,7 +1456,8 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         const value = await callWakeTool(store, secret, identity, name, args);
         return { jsonrpc: "2.0", id: requestId, result: toolResult(value, false, credentialRedactions(name, value)) };
       }
-      const value = await callRoomTool(store, secret, identity, name, args, agentRooms, spendCredential, signal, oauthPrincipal, mcpUrl);
+      const value = await callRoomTool(store, secret, identity, name, args, agentRooms, spendCredential, signal,
+        oauthPrincipal, mcpUrl, { projectReceiverStreams });
       if (name === "room_check_access" && value.scope === "room") {
         value.nativeMonitoring = oauthPrincipal && typeof nativeStatus === "function"
           ? await nativeStatus(mcpOAuthPrincipalDescriptor(oauthPrincipal))
@@ -1621,7 +1625,7 @@ function resolveMcpIdentity(store, secret, userAgent) {
   return identity;
 }
 
-export function createHostedRoomMcp(store, { agentRooms, spendCredential, oauthProvider, inviteOAuthProvider, oauthResource, nativeHandler, nativeStatus } = {}) {
+export function createHostedRoomMcp(store, { agentRooms, spendCredential, oauthProvider, inviteOAuthProvider, oauthResource, nativeHandler, nativeStatus, projectReceiverStreams } = {}) {
   const rooms = agentRooms ?? new AgentRooms(store);
   return withMcpCallLog(async function hostedRoomMcp(message, { authorization, mcpUrl, searchParams, userAgent, remoteAddress, signal } = {}) {
     if (typeof authorization === "string" && /^bearer (?:oat|iat)_/i.test(authorization)) {
@@ -1639,7 +1643,7 @@ export function createHostedRoomMcp(store, { agentRooms, spendCredential, oauthP
             authorizeDescriptor: descriptor => authorizeMcpOAuthDescriptor({ store, accountProvider: oauthProvider,
               inviteProvider: inviteOAuthProvider, resource: oauthResource, descriptor }) });
         return handleAuthed(message, { store, secret: token, identity, mcpUrl,
-          searchParams, agentRooms: rooms, spendCredential, oauthPrincipal: principal, nativeEventsEnabled: typeof nativeHandler === "function", nativeStatus, signal });
+          searchParams, agentRooms: rooms, spendCredential, oauthPrincipal: principal, nativeEventsEnabled: typeof nativeHandler === "function", nativeStatus, projectReceiverStreams, signal });
       });
     }
     // Anonymous enrollment: mint an identity secret without leaving MCP.
@@ -1658,6 +1662,6 @@ export function createHostedRoomMcp(store, { agentRooms, spendCredential, oauthP
     if (parsed.error) return rpcError(message, MCP_AUTH_REQUIRED, parsed.error);
     const identity = resolveMcpIdentity(store, parsed.secret, userAgent);
     if (!identity) return rpcError(message, MCP_AUTH_REQUIRED, "Unknown or revoked identity credential");
-    return handleAuthed(message, { store, secret: parsed.secret, identity, mcpUrl, searchParams, agentRooms: rooms, spendCredential, signal });
+    return handleAuthed(message, { store, secret: parsed.secret, identity, mcpUrl, searchParams, agentRooms: rooms, spendCredential, projectReceiverStreams, signal });
   });
 }
