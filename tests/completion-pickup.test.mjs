@@ -18,8 +18,14 @@ import { linkWithProof } from "./helpers/link-with-proof.mjs";
 import { textVersion } from "../server/text-results.mjs";
 import { createWork } from "../server/work-claims.mjs";
 
-async function checkScopedInvestigation(t, firstLine) {
-  const f = createAcceptanceFixture(), roomId = "commons", workItemId = "qa-work", recipientId = "pickup-reviewer";
+async function checkScopedInvestigation(t, firstLine, { representation, existingWork = false } = {}) {
+  const directory = mkdtempSync(join(tmpdir(), "room-callback-investigation-"));
+  const roomId = "commons", workItemId = "qa-work", recipientId = "pickup-reviewer";
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  let stop = () => {};
+  t.after(() => { stop(); store.close(); rmSync(directory, { recursive: true, force: true }); });
+  store.initialize(initialRoom(roomId), representation ? { representation } : {});
+  const f = { store, directory, keys: { owner: store.issueAccessKey(roomId, "owner") } };
   const agent = f.store.identities.create("Pickup reviewer");
   linkWithProof(f.store, f.keys.owner, roomId, agent, { memberId: recipientId, permissions: ["accept_work","verify"] });
   const requesterId = f.store.authenticate(f.keys.owner, roomId).member.id;
@@ -42,16 +48,47 @@ async function checkScopedInvestigation(t, firstLine) {
   atomicPrivateJson(config,{checkpointPath,routes:[{ roomId, requesterId, recipientId, workItemId, credentialPath, after, firstLine }]});
   const log=[];
   const start=()=>startCompletionPickup(f.store,config,msg=>log.push(JSON.parse(msg)));
-  let stop=start();
-  t.after(()=>{stop();f.store.close();rmSync(f.directory,{recursive:true,force:true});});
+  stop=start();
   const read=()=>f.store.replyRequests.list(f.keys.owner,roomId,{direction:"outgoing",status:"all"}).requests;
   const first = request("Verify current evidence", "initial-qa");
   await setImmediate();
   assert.equal(read().length,1);
-  answer(first.event.data.messageId);
+  if (existingWork) {
+    const assignedWork = "other-review";
+    store.command(f.keys.owner, roomId, { id: randomUUID(), type: "work.proposed", data: {
+      workItemId: assignedWork, title: "Review the current install notes", definitionOfDone: "Return source evidence.",
+      accountableMemberId: recipientId, mode: "read"
+    } });
+    store.command(agent.secret, roomId, { id: randomUUID(), type: "work.accepted", data: {
+      workItemId: assignedWork, expectedRevision: 0
+    } });
+    answer(first.event.data.messageId);
+    await setImmediate();
+    assert.equal(read().length, 1, "the callback's answer cannot trigger discovery over a ready Work Thread");
+    assert.deepEqual(log, []);
+    stop();
+    stop = start();
+    await setImmediate();
+    assert.equal(read().length, 1, "restart keeps the existing Work Thread first");
+    store.command(f.keys.owner, roomId, { id: randomUUID(), type: "work.superseded", data: {
+      workItemId: assignedWork, expectedRevision: 1, supersededByWorkItemId: workItemId,
+      reason: "The current shared review now covers the check."
+    } });
+    const fresh = request("Verify a separate current finding", "next-qa");
+    answer(fresh.event.data.messageId);
+    if (representation) {
+      await setImmediate();
+      assert.equal(read().length, 2, "an unavailable help listing must not authorize callback discovery");
+      assert.deepEqual(log, []);
+      return;
+    }
+  } else {
+    answer(first.event.data.messageId);
+  }
   await setImmediate();
-  assert.equal(read().length,2,JSON.stringify(log));
-  const next=read().find(item=>item.id!==first.event.data.messageId);
+  const count = existingWork ? 3 : 2;
+  assert.equal(read().length,count,JSON.stringify(log));
+  const next=read().find(item=>item.status==="open");
   assert.equal(next.workItemId,workItemId);
   const opened = f.store.replyRequests.selected(agent.secret,roomId,next.id,{view:"compact"}).page.items[0].message.body;
   assert.ok(opened.startsWith(firstLine === undefined ? `@(${recipientId}) Room investigation pass.\n`
@@ -60,10 +97,10 @@ async function checkScopedInvestigation(t, firstLine) {
   rmSync(checkpointPath);
   stop=start();
   await setImmediate();
-  assert.equal(read().length,2);
+  assert.equal(read().length,count);
   answer(next.id);
   await setImmediate();
-  assert.equal(read().length,2);
+  assert.equal(read().length,count);
   assert.deepEqual(log.map(x=>x.event),["completion_pickup.posted"]);
 }
 
@@ -71,6 +108,11 @@ test("a settled formal QA opens one scoped investigation, and catch-up cannot re
   t => checkScopedInvestigation(t));
 test("a completion route preserves the receiver's exact first line without chaining an investigation",
   t => checkScopedInvestigation(t, "Claude Code QA"));
+for (const representation of [undefined, "normalized-current-v1"]) {
+  test(`callback discovery gives an accepted assignment priority (${representation ?? "legacy"})`,
+    t => checkScopedInvestigation(t, undefined, { representation, existingWork: true }));
+}
+
 
 async function checkPlannedContinuation(t, representation) {
   const directory = mkdtempSync(join(tmpdir(), "room-planned-continuation-"));
