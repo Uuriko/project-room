@@ -363,6 +363,9 @@ const JSON_BODY_BYTES = 16384;
 const rateHash = value => createHash("sha256").update(String(value)).digest("hex");
 // A lagging stream that still has not drained its final event by now is dropped.
 const STREAM_DRAIN_GRACE_MS = 5000;
+// The scoped Muse receiver renews its waiting stream every 12 seconds.
+// An open response can outlive a sleeping or disconnected laptop.
+const SCOPED_RECEIVER_WAITING_MS = 24000;
 // Stream admission (R-16.5): the server-wide ceiling bounds total SSE load;
 // the per-room share keeps any single room from holding more than half of
 // the pool, so one fully-watched room cannot refuse streams to every other
@@ -1169,10 +1172,15 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
     if (streams.size >= STREAM_POOL_LIMIT || sameRoom >= STREAM_PER_ROOM_LIMIT || sameCredential >= 3) reject(429, "stream_limit", "Close another room connection before opening more");
     const agentReceiver = auth.member.kind === "agent";
     const connectedThrough = agentReceiver ? store.headSequence(roomId) : null;
+    const advertisedAt = receiverState ? store.now() : null;
     res.writeHead(200, { "Content-Type": "text/event-stream", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
     res.flushHeaders();
     const entry = { credentialHash: auth.credentialHash, sessionBinding: binding, memberId: auth.member.id, roomId, res, receiverScope,
-      ...(receiverState ? { receiverWaitingSince: new Date().toISOString() } : {}),
+      get receiverWaitingSince() {
+        if (advertisedAt === null) return null;
+        const age = store.now() - advertisedAt;
+        return age >= 0 && age < SCOPED_RECEIVER_WAITING_MS ? new Date(advertisedAt).toISOString() : null;
+      },
       ...(agentReceiver ? { connectedThrough, receiverCursor: after,
         stillAuthorized: () => {
           try { return store.authenticate(token, roomId, binding).member.id === auth.member.id; }
