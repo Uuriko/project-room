@@ -781,6 +781,19 @@ for (const normalized of [false, true]) test(`OAuth work:write lifecycle fits th
   assert.equal(supplyRequest.arguments.toMemberId, 'owner');
   assert.equal(supplyRequest.arguments.workItemId, nextWorkItemId);
   assert.deepEqual((await call('room_submit_text_result', secondInput)).supplyRequest, supplyRequest);
+  const linkedRequestId = 'linked-completion-question';
+  f.store.command(f.ownerKey, 'commons', { id: 'linked-result-question', type: 'message.posted',
+    data: { messageId: linkedRequestId, toMemberId: 'friend-dot', workItemId: nextWorkItemId,
+      requestKind: 'reply', body: 'Which evidence did you use?' } });
+  const linked = await f.rpc('tools/call', { name: 'room_read_request', arguments: { requestMessageId: linkedRequestId } });
+  assert.equal(refusal(linked.body), null, JSON.stringify(linked.body));
+  const answer = reviewed(linked.body)
+    .responseActions.find(action => action.arguments.responseOutcome === 'answered');
+  const replyArgs = { ...answer.arguments, requestId: 'linked-result-answer', body: 'I used the stored result.' };
+  const answered = await call(answer.tool, replyArgs);
+  assert.equal(answered.preparedPickup.nextRead, null);
+  assert.deepEqual(answered.supplyRequest, supplyRequest, 'one Work Thread completion can offer only one supply operation');
+  assert.deepEqual((await call(answer.tool, replyArgs)).supplyRequest, supplyRequest);
   const consent = await f.consent({ scope: 'rooms:read chat:read work:read work:write' });
   const code = new URL(consent.headers.get('location')).searchParams.get('code');
   const tokens = await f.exchange({ grant_type: 'authorization_code', code, client_id: CLIENT.clientId,
@@ -1078,6 +1091,8 @@ for (const normalized of [false, true]) test(`OAuth callback can use its suggest
   const receipt = await call(answer.tool, responseArgs);
   assert.equal(receipt.next.tool, 'room_read_request');
   assert.deepEqual(receipt.nextPickup, { tool: 'room_next', arguments: { roomId, view: 'pickup' } });
+  assert.equal(receipt.preparedPickup.nextRead, null);
+  assert.equal(receipt.supplyRequest, undefined, 'an unlinked reply cannot start a supply loop');
   const replay = await call(answer.tool, responseArgs);
   assert.equal(replay.duplicate, true);
   assert.deepEqual(replay.nextPickup, receipt.nextPickup);
@@ -1089,6 +1104,8 @@ for (const normalized of [false, true]) test(`OAuth callback can use its suggest
   const narrow = reviewed((await f.rpc('tools/call', { name: answer.tool, arguments: responseArgs }, (await tokens.json()).access_token)).body);
   assert.equal(narrow.duplicate, true);
   assert.equal(narrow.nextPickup, undefined);
+  assert.equal(narrow.preparedPickup, undefined);
+  assert.equal(narrow.supplyRequest, undefined);
 
   const freshAccess = await call('room_check_access');
   assert.deepEqual(freshAccess.initialPickup.work.items, []);
@@ -1111,6 +1128,15 @@ for (const normalized of [false, true]) test(`OAuth callback can use its suggest
   assert.equal((await call(lead.record.tool, record)).duplicate, true);
   pickup = await call('room_next', { view: 'pickup' });
   assert.equal(pickup.ifIdle?.investigation, undefined);
+
+  command('coordination', 'message.posted', { messageId: 'linked-coordination', toMemberId: 'friend-dot',
+    workItemId, requestKind: 'reply', body: 'Can you suggest a follow-up?' });
+  const coordination = await call('room_read_request', { requestMessageId: 'linked-coordination' });
+  const coordinationAnswer = coordination.responseActions.find(action => action.arguments.responseOutcome === 'answered');
+  const coordinated = await call(coordinationAnswer.tool,
+    { ...coordinationAnswer.arguments, requestId: 'answer-coordination', body: 'I will look for eligible work.' });
+  assert.equal(coordinated.preparedPickup.nextRead, null);
+  assert.equal(coordinated.supplyRequest, undefined, 'answering a linked coordination request cannot refill another producer');
 });
 
 for (const normalized of [false, true]) test(`OAuth investigation keeps its external completion after replacement (${normalized ? 'normalized' : 'legacy'})`, async t => {

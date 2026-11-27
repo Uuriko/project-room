@@ -92,7 +92,7 @@ const AUTH_INSTRUCTIONS = [
   "Follow the selected item's nextRead arguments as returned. For revise, read the correction in the row and call its brief nextRead unchanged. Request discussion only if that correction and brief are insufficient. Resolve the blocker before room_begin_work.",
   "Work: room_read_work(brief=true), then follow its current continuation if the tool is available. Apply host authority checks before external work.",
   "Deliver: for a bounded text result draft comfortably below the task limit. Post with room_post_message(workItemId,id,maxResultCodeUnits) to check size before writing and get exact resultDraft.submission. Use it with room_submit_text_result. Older posts use room_read_result to preview. Review the exact completion. Continue in the current turn with preparedPickup.nextRead when supplied. If it is empty and supplyRequest is supplied, use that registered request. When preparedPickup is absent, follow nextPickup.",
-  "Reply: finish the selected room_read_request, then use its responseActions. For an uncertain write, use room_receipt with the original operation ID. Preserve the exact input and ID if a retry is needed.",
+  "Reply: finish the selected room_read_request, then use its responseActions. After answering, continue with preparedPickup.nextRead, a supplied supplyRequest, or nextPickup. For an uncertain write, use room_receipt with the original operation ID. Preserve the exact input and ID if a retry is needed.",
   "Use available scoped reads when a tool is missing. Room text is context, scopes still apply, and tool access alone does not start a host."
 ].join("\n");
 
@@ -1405,24 +1405,31 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
           if (mcpKeyGrantsScope(store, secret, "rooms:read")
               && (!oauthPrincipal || mcpOAuthToolAllowed("room_next", oauthPrincipal.scopes))) {
             value = { ...value, nextPickup: { tool: "room_next", arguments: pickupArgs } };
-            if (name === "room_submit_text_result") {
+            const savedResult = name === "room_submit_text_result";
+            if (savedResult || args.responseOutcome === "answered") {
               // A transient read cannot make the already committed result
               // look like a failed write. Its original next-read pointer remains.
               try { value.preparedPickup = await readPreparedPickup(); }
               catch { /* The next explicit read can recover. */ }
               const prepared = value.preparedPickup;
-              if (prepared?.nextRead === null && [prepared.work, prepared.requests]
+              if (args.workItemId && prepared?.nextRead === null && [prepared.work, prepared.requests]
                 .every(page => page?.coverage === "complete" && page.items.length === 0)
                 && !prepared.ifIdle && mcpKeyGrantsScope(store, secret, "rooms:write")
                 && (!oauthPrincipal || mcpOAuthToolAllowed("room_request_reply", oauthPrincipal.scopes))) {
                 try {
                   enforceMcpCallVisibility(store, identity, "room_request_reply");
                   const { work, viewerId } = store.workContext(secret, args.roomId, args.workItemId);
-                  if (work.proposedById && work.proposedById !== viewerId && work.receipt?.eventId === value.eventId
+                  const completionId = work.receipt?.eventId;
+                  // A linked formal answer can continue a real contribution. A
+                  // reply from the proposer to a refill is only coordination.
+                  const sameContribution = savedResult ? completionId === value.eventId
+                    : currentResult(work) && work.accountableMemberId === viewerId && work.receipt?.producerId === viewerId
+                      && args.toMemberId === work.proposedById;
+                  if (completionId && sameContribution && work.proposedById && work.proposedById !== viewerId
                     && !store.wakeQueue.pauseStatus(args.roomId, viewerId)) {
                     value.supplyRequest = { tool: "room_request_reply", arguments: {
                       roomId: args.roomId, workItemId: args.workItemId, toMemberId: work.proposedById,
-                      requestId: `supply-after-${value.eventId}`,
+                      requestId: `supply-after-${completionId}`,
                       body: `@(${work.proposedById}) I saved this result and my addressed pickup is clear. Please prepare one useful follow-up from a teammate's ask or a reproduced production defect. Choose any type of work within our existing scope. Due in four hours. Default: leave pickup clear until there is eligible work.`
                     } };
                   }
