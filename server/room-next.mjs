@@ -294,9 +294,7 @@ function unrecordedInvestigation(store, roomId, charter, goal, { project, receip
   }
   const nextRead = receipt
     ? { tool: "public_work_read_task", arguments: { taskId: receipt.taskId } }
-    : result ? (result.kind === "room_text"
-      ? { tool: "room_read_result", arguments: { roomId, workItemId: result.workItemId, completionEventId: result.completionEventId } }
-      : { tool: "room_read_work", arguments: { roomId, workItemId: result.workItemId, brief: true, includeResult: true } })
+    : result ? { tool: "room_read_result", arguments: { roomId, workItemId: result.workItemId, completionEventId: result.completionEventId } }
       : { tool: "room_list_work", arguments: { roomId, focus: "results", limit: 1 } };
   return { basis, criterion, nextRead,
     question: receipt
@@ -304,7 +302,8 @@ function unrecordedInvestigation(store, roomId, charter, goal, { project, receip
       : "Which observed result supports this criterion, or which specific bottleneck prevents it?",
     ...(project && { projectPath: project.path, ...(project.repositoryUrl && { repositoryUrl: project.repositoryUrl }) }),
     ...(receipt && { taskPath: receipt.taskPath, receiptPath: receipt.receiptPath, artifactPath: receipt.artifactPath }),
-    guidance: "Follow the selected evidence. A better evidenced bottleneck or optimization within this scope is also useful. Check existing work first. An empty partial page is inconclusive. Record the source, check, observation and smallest next step, or a scoped clean result. Keep restricted evidence with its original audience. For a Room-safe note, start body with record.bodyPrefix and append your result. This checkpoint deduplicates delivery; it does not reserve the check.",
+    guidance: (result ? "Use this exact completion only while it is current, complete, visible to the Room and available. If it becomes historical, withdrawn or inaccessible, return to pickup without recording a finding for this lead. " : "")
+      + "Follow the selected evidence. A better evidenced bottleneck or optimization within this scope is also useful. Check existing work first. An empty partial page is inconclusive. Record the source, check, observation and smallest next step, or a scoped clean result. Keep restricted evidence with its original audience. For a Room-safe note, start body with record.bodyPrefix and append your result. This checkpoint deduplicates delivery; it does not reserve the check.",
     record: { tool: "room_post_message", arguments: { roomId, id, messageId: id, compact: true },
       inputRequired: ["body"], bodyPrefix,
       onMessageExists: {
