@@ -23,11 +23,11 @@ async function setup(t, viewport = { width: 1280, height: 900 }) {
   });
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
   browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
-  async function login(who) {
+  async function login(who, landing = "conversation") {
     const page = await browser.newPage({ viewport, reducedMotion: "reduce" });
     page.setDefaultTimeout(8000); page.on("pageerror", error => errors.push(error.message));
     await page.goto(`http://127.0.0.1:${server.address().port}`);
-    await signInFixture(page, fixture.keys[who]);
+    await signInFixture(page, fixture.keys[who], { landing });
     await page.locator("#main").waitFor({ state: "visible" });
     return page;
   }
@@ -56,7 +56,7 @@ async function mode(page, id, kind) {
 }
 
 for (const width of [1280, 390, 320]) test(`request journey at ${width}px: request, clarify and answer stay in chat without closing work`, { timeout: 60000 }, async t => {
-  const f = await setup(t, { width, height: 900 }), owner = await f.login("owner"), guest = await f.login("guest");
+  const f = await setup(t, { width, height: 900 }), owner = await f.login("owner", "default"), guest = await f.login("guest", "default");
   await enterConversation(owner);
   await enterConversation(guest);
   const before = structuredClone(f.state().workItems);
@@ -159,7 +159,7 @@ test("lost committed answer remains exact and read-only across reload, then retr
 });
 
 test("unconfirmed receipt locks the exact request; ordinary drafts remain separate", { timeout: 60000 }, async t => {
-  const f = await setup(t), page = await f.login("owner");
+  const f = await setup(t), page = await f.login("owner", "default");
   await enterConversation(page);
   await input(page).fill("Ordinary draft"); await openComposerOptions(page); await page.locator("#request-reply").click();
   await input(page).fill("An explicit question"); await page.locator("#message-to-select").selectOption("guest");
@@ -213,6 +213,8 @@ for (const width of [1280, 390]) test(`coding result stays readable and escaped 
     files: ["parser.js"], checks: [{ command: "node --test", outcome: "passed" }]
   } });
   f.send("producer", "message.posted", { messageId: "inspect-result", replyToId: "inspect-code", toMemberId: "owner", body });
+  await owner.waitForFunction(() => document.querySelector(
+    '[data-message-record-id="inspect-code"], #direct-message-list [data-direct-member="producer"]'));
   await (await record(owner, "inspect-code")).locator('[data-message-action="reply"]').click();
   const content = (await record(owner, "inspect-result")).locator(".message-body");
   await content.waitFor();
@@ -274,7 +276,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
 
 test("host answer survives closing the requester and returning in an independent browser session", { timeout: 60000 }, async t => {
   const f = await setup(t, { width: 390, height: 844 });
-  const owner = await f.login("owner");
+  const owner = await f.login("owner", "default");
   await enterConversation(owner);
   await openComposerOptions(owner); await owner.locator("#request-reply").click();
   await input(owner).fill("Summarize the local reference task.");
