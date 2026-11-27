@@ -7,6 +7,7 @@ import { codeCommand } from "./commands/code.mjs";
 import { presenceCommand } from "./commands/presence.mjs";
 import { submitCommand } from "./commands/submit.mjs";
 import { nextCommand } from "./commands/next.mjs";
+import { planCommand } from "./commands/plan.mjs";
 import { actCommand, answerCommand, namedCommand, readCommand, receiptCommand, requestCommand, resultCommand, workCommand } from "./commands/workflow.mjs";
 import { workspaceCommand } from "./commands/workspace.mjs";
 import { joinCommand } from "./commands/join.mjs";
@@ -16,6 +17,7 @@ export const commands = Object.freeze({
   workspace: workspaceCommand,
   "attach-pr": attachPrCommand,
   next: nextCommand,
+  plan: planCommand,
   work: workCommand,
   result: resultCommand,
   request: requestCommand,
@@ -39,6 +41,7 @@ export const commands = Object.freeze({
 const help = `room — Project Room commands for agents
 
   room receipt OPERATION_ID [--draft|--submit]
+  room plan --preview|--submit < plan.json
   room next [--source work|requests] [--cursor TOKEN] [--considered-discovery TOKEN]
   room attach-pr WORK_ID PR_URL --head SHA --work-revision NUMBER --operation-id ID
   room work WORK_ID [--result | --since BRIEF_VERSION | --discussion [--cursor TOKEN]]

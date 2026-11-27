@@ -73,7 +73,7 @@ async function fixture(t, representation) {
     assert.equal(lines.length, 1);
     return { code, value: lines[0] };
   };
-  return { home, env, store, owner, producer, reviewer, reviewerProject, rpc, save, cli };
+  return { home, env, origin, store, owner, producer, reviewer, reviewerProject, rpc, save, cli };
 }
 
 for (const representation of ["legacy", "normalized-current-v1"]) {
@@ -344,3 +344,84 @@ test(`${representation} answers use the saved request, stop at a correction and 
 
 });
 }
+
+test("room plan previews offline and reuses a partially recorded QA batch after a lost receipt", async t => {
+  const { home, env, origin, owner, producer, reviewer, store, rpc, cli } =
+    await fixture(t, "normalized-current-v1");
+  const planner = store.identities.create("Planner");
+  linkWithProof(store, owner, "commons", planner, { displayName: "Planner", permissions: ["steer"] });
+  const directory = connectionHome("owner", env);
+  saveAgentConnection(directory, { version: 1, origin, roomId: "commons", memberId: planner.identityId, token: planner.secret });
+  writePointer("owner", directory, env);
+  const ownerProject = join(home, "owner-project");
+  writeProject(ownerProject, { connection: "owner" });
+  const row = (key, accountableMemberId) => ({
+    key, accountableMemberId, title: `QA ${key}`, definitionOfDone: "Return source and a verdict.",
+    mode: "read", independentVerificationRequired: false, ownerDecisionRequired: false
+  });
+  const input = { planId: "qa", items: [
+    row("onboarding", producer.identityId), row("correction", reviewer.identityId), row("resume", producer.identityId)
+  ] };
+  const wrongDirectory = connectionHome("wrong-planner", env);
+  saveAgentConnection(wrongDirectory, {
+    version: 1, origin, roomId: "commons", memberId: producer.identityId, token: planner.secret
+  });
+  writePointer("wrong-planner", wrongDirectory, env);
+  const wrongProject = join(home, "wrong-planner-project");
+  writeProject(wrongProject, { connection: "wrong-planner" });
+  let mismatchedWrites = 0;
+  await assert.rejects(cli(["plan", "--submit"], input, wrongProject, async (url, options) => {
+    if (options.method === "POST") mismatchedWrites += 1;
+    return fetch(url, options);
+  }), { code: "identity_mismatch" });
+  await assert.rejects(cli(["plan", "--submit"], input, home, async (url, options) => {
+    if (options.method === "POST") mismatchedWrites += 1;
+    return fetch(url, options);
+  }), /steer permission/);
+  assert.equal(mismatchedWrites, 0);
+  const submitted = [];
+  const preview = await cli(["plan", "--preview"], input, ownerProject, () => {
+    throw new Error("Preview made a network request");
+  });
+  assert.equal(preview.code, 0);
+  assert.deepEqual(preview.value.proposals.map(proposal => proposal.workItemId), ["qa-onboarding", "qa-correction", "qa-resume"]);
+
+  const interrupted = await cli(["plan", "--submit"], input, ownerProject, async (url, options) => {
+    const response = await fetch(url, options);
+    if (options.method === "POST") {
+      const { data } = JSON.parse(options.body);
+      submitted.push({ id: data.workItemId, status: response.status });
+      if (data.workItemId === "qa-correction") {
+        await response.body.cancel();
+        throw new Error("Lost the response after the second item committed");
+      }
+    }
+    return response;
+  });
+  assert.equal(interrupted.code, 1);
+  assert.equal(interrupted.value.status, "unconfirmed");
+  assert.deepEqual(submitted, [{ id: "qa-onboarding", status: 201 }, { id: "qa-correction", status: 201 }], JSON.stringify(interrupted));
+  assert.deepEqual(interrupted.value.next[0].arguments, input);
+
+  const retried = await cli(["plan", "--submit"], input, ownerProject);
+  assert.equal(retried.code, 0);
+  assert.deepEqual(retried.value.recorded.map(proposal => [proposal.workItemId, proposal.duplicate]),
+    [["qa-onboarding", true], ["qa-correction", true], ["qa-resume", false]]);
+  assert.equal(retried.value.recorded[0].sequence, interrupted.value.recorded[0].sequence);
+
+  const pickup = async actor => {
+    let args = { source: "work" };
+    const assignments = [];
+    while (args) {
+      const page = (await rpc("room_next", args, actor)).work;
+      assignments.push(...page.items.filter(item => item.id.startsWith("qa-")));
+      args = page.nextRead?.arguments;
+    }
+    return assignments;
+  };
+  const producerRows = await pickup(producer);
+  assert.deepEqual(producerRows.map(row => row.id).sort(), ["qa-onboarding", "qa-resume"]);
+  assert.ok(producerRows.every(row => row.reason === "accept"));
+  const reviewerRows = await pickup(reviewer);
+  assert.deepEqual(reviewerRows.map(row => row.id), ["qa-correction"]);
+});

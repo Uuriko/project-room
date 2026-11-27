@@ -99,7 +99,7 @@ optional.push("src/workspace-previews-ui.js", "src/workspace-artifact-link.js", 
 optional.push("server/workspace-preview-viewer.mjs", "server/workspace-publisher-address.mjs");
 optional.push("client/auto-presence.mjs", "bin/room.mjs", "cli/workspace-dev-server.mjs", "cli/workspace-process-supervisor.mjs", "cli/workspace-preview-publisher.mjs",
   "third_party/buzz-worktree/port.mjs", "third_party/buzz-worktree/LICENSE", "third_party/buzz-worktree/NOTICE", "cli/main.mjs", "cli/auth.mjs", "cli/codex-config.mjs", "cli/files.mjs", "cli/keychain.mjs", "cli/paths.mjs", "cli/which.mjs",
-  ...["code", "doctor", "join", "login", "next", "presence", "setup", "submit", "token", "workflow", "workspace"].map(name => `cli/commands/${name}.mjs`));
+  ...["code", "doctor", "join", "login", "next", "plan", "presence", "setup", "submit", "token", "workflow", "workspace"].map(name => `cli/commands/${name}.mjs`));
 optional.push("src/owner-cockpit.js"); // #3342: Owner Cockpit account-home shell (imported by src/app.js)
 optional.push("src/emoji.js", "src/legacy-reaction-aliases.js"); // Historical source packages only.
 optional.push("src/emoji-catalog.js"); // Historical source packages only; removed from current public assets.
