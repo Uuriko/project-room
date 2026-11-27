@@ -96,7 +96,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     const docked = !focused && wide.matches;
     resultReader.classList.toggle("result-focused", focused);
     const checks = resultElement("result-release-checks");
-    const checksBefore = resultElement(focused ? "result-work-context" : "result-work-action");
+    const checksBefore = resultElement(focused ? "result-work-context" : "result-correction");
     if (checks.nextElementSibling !== checksBefore) checksBefore.before(checks);
     resultReader.classList.toggle("result-docked", docked);
     resultReader.classList.toggle("result-mobile", !docked && !focused);

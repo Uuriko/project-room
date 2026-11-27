@@ -178,7 +178,8 @@ for (const browserType of [chromium, webkit]) test(`a coworker can open the link
   await page.locator("#result-body").getByText("Release owner: Maya", { exact: true }).waitFor();
   assert.equal(page.url(), href);
   assert.equal(await page.locator("#identity-label").textContent(), "Independent reviewer");
-  await page.getByRole("button", { name: "Record independent check", exact: true }).waitFor();
+  const reviewAction = page.getByRole("button", { name: "Record independent check", exact: true });
+  await reviewAction.waitFor();
   assert.ok(reads.length > 0);
   assert.equal(new URL(reads[0]).searchParams.get("completionEventId"), result.event.id);
   assert.ok(reads.every(read => new URL(read).pathname === `/api/rooms/${destinationRoom}/work-result`));
@@ -186,6 +187,18 @@ for (const browserType of [chromium, webkit]) test(`a coworker can open the link
   const comparison = page.locator("#result-diff .result-comparison");
   assert.equal(await comparison.evaluate(detail => detail.open), false);
   assert.equal(previousReads().length, 0, "cross-Room review opens only the current result");
+  if (process.env.ROOM_CROSS_RESULT_CAPTURE) await page.screenshot({
+    path: process.env.ROOM_CROSS_RESULT_CAPTURE + "-current-" + browserType.name() + ".png"
+  });
+  const resultBox = await page.locator("#result-body").boundingBox();
+  const actionBox = await reviewAction.boundingBox();
+  const compareBox = await comparison.locator("summary").boundingBox();
+  assert.ok(resultBox && actionBox && compareBox);
+  assert.ok(resultBox.y + resultBox.height <= actionBox.y && actionBox.y + actionBox.height + 4 <= compareBox.y,
+    "the exact result comes before the review action and the optional comparison follows");
+  await reviewAction.focus();
+  await page.keyboard.press("Tab");
+  assert.equal(await comparison.locator("summary").evaluate(node => node === document.activeElement), true);
   await comparison.locator("summary").press("Enter");
   await comparison.getByText("- Release owner missing", { exact: true }).waitFor();
   assert.equal(previousReads().length, 1, "explicit comparison reads the previous pinned completion once");
