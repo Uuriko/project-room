@@ -5326,6 +5326,7 @@ paths:
   /api/rooms/{roomId}/github-work-attachment:
     post:
       operationId: attachGitHubPullRequest
+      x-room-permission: complete_work
       summary: Attach an exact GitHub pull request to a Work Thread
       description: Requires a Room bearer identity for the assigned producer and an enabled recipe for the repository. Retry the original input after an unknown outcome. Use the returned receipt operation ID to look up the write.
       parameters:
