@@ -626,14 +626,14 @@ async function callLandTool(store, secret, name, args) {
 // refusal — the tool must not run. withSpendCharge (spend-grants.mjs) is the
 // single implementation of the settle/void contract — the REST doors run
 // the same helper, so a priced operation charges identically everywhere.
-function callRoomTool(store, secret, identity, name, args, agentRooms, spendCredential, signal, oauthPrincipal, mcpUrl) {
+function callRoomTool(store, secret, identity, name, args, agentRooms, spendCredential, signal, oauthPrincipal, mcpUrl, options) {
   if (typeof spendCredential === "function") {
     spendCredential(secret, mcpRoomToolScope(name) === "rooms:write" ? "write" : "read");
   }
   enforceMcpApiKeyRoomScope(store, secret, name, args.roomId);
   enforceMcpCallVisibility(store, identity, name);
   return withSpendCharge(store, secret, name, args,
-    () => dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, signal, oauthPrincipal, mcpUrl));
+    () => dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, signal, oauthPrincipal, mcpUrl, options));
 }
 
 // A work-item tool given a Board claim id answered a bare work_not_found
@@ -665,12 +665,14 @@ async function boardClaimCall(store, secret, name, args) {
   throw error;
 }
 
-function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, signal, oauthPrincipal, mcpUrl) {
+function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, signal, oauthPrincipal, mcpUrl, { addressedOnly = false } = {}) {
   if (name === "room_receipt") return store.operationReceipt(secret, args.roomId, args.operationId);
   if (name === "room_next") return withContentTrust(readRoomNext(store, secret, args.roomId, args,
-    () => listRoomWork(store, secret, { roomId: args.roomId, focus: "help_wanted", limit: 1 }),
-    { discoveryOrigin: new URL(mcpUrl ?? ROOM_MCP_PUBLIC_URL).origin, allowInvestigation: mcpKeyGrantsScope(store, secret, "rooms:write")
-      && (!oauthPrincipal || mcpOAuthToolAllowed("room_post_message", oauthPrincipal.scopes)), allowPublicReview: !oauthPrincipal || mcpOAuthToolAllowed("room_record_public_review", oauthPrincipal.scopes),
+    addressedOnly ? null : () => listRoomWork(store, secret, { roomId: args.roomId, focus: "help_wanted", limit: 1 }),
+    { discoveryOrigin: addressedOnly ? undefined : new URL(mcpUrl ?? ROOM_MCP_PUBLIC_URL).origin,
+      allowInvestigation: !addressedOnly && mcpKeyGrantsScope(store, secret, "rooms:write")
+        && (!oauthPrincipal || mcpOAuthToolAllowed("room_post_message", oauthPrincipal.scopes)),
+      allowPublicReview: !addressedOnly && (!oauthPrincipal || mcpOAuthToolAllowed("room_record_public_review", oauthPrincipal.scopes)),
       allowPublicTaskRead: !oauthPrincipal || mcpOAuthToolAllowed("public_work_read_task", oauthPrincipal.scopes) }));
   if (name === "room_read_project_discoveries") {
     const member = store.authenticate(secret, args.roomId).member;
@@ -1452,7 +1454,8 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
           // denial must leave an otherwise valid access check usable.
           try {
             value.initialPickup = await callRoomTool(store, secret, identity, "room_next",
-              { roomId: value.roomId, view: "pickup" }, agentRooms, spendCredential, signal, oauthPrincipal, mcpUrl);
+              { roomId: value.roomId, view: "pickup" }, agentRooms, spendCredential, signal, oauthPrincipal, mcpUrl,
+              { addressedOnly: true });
           } catch (error) {
             if (!(error instanceof ServiceError)) throw error;
           }

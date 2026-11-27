@@ -1045,6 +1045,12 @@ for (const normalized of [false, true]) test(`OAuth callback can use its suggest
   assert.equal(narrow.duplicate, true);
   assert.equal(narrow.nextPickup, undefined);
 
+  const freshAccess = await call('room_check_access');
+  assert.deepEqual(freshAccess.initialPickup.work.items, []);
+  assert.deepEqual(freshAccess.initialPickup.requests.items, []);
+  assert.equal(freshAccess.initialPickup.nextRead, null);
+  assert.equal(freshAccess.initialPickup.ifIdle?.investigation, undefined);
+
   let pickup = await call(receipt.nextPickup.tool, receipt.nextPickup.arguments);
   while (pickup.nextRead?.tool === 'room_next') pickup = await call(pickup.nextRead.tool, pickup.nextRead.arguments);
   const lead = pickup.ifIdle.investigation;
