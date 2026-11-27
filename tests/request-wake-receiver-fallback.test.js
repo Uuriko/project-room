@@ -41,7 +41,7 @@ function beat(store, identity, hostId = "host-1") {
 }
 
 for (const representation of [undefined, "normalized-current-v1"]) {
-  test(`pull fallback stays out of push fan-out (${representation ?? "legacy"})`, t => {
+  test(`pull fallback stays out of push fan-out (${representation ?? "legacy"})`, async t => {
     const { store, receiver, post, signal } = fixture(t, [], representation);
     const deliveries = [];
     store.agentPlugin.deliverWakePing = ({ signal: delivered }) => deliveries.push(["webhook", delivered.messageId]);
@@ -54,7 +54,33 @@ for (const representation of [undefined, "normalized-current-v1"]) {
 
     beat(store, receiver.identity);
     assert.deepEqual(ask("connected").wakeDelivery, [{ memberId: "receiver", status: "queued" }]);
+    await Promise.resolve();
     assert.deepEqual(deliveries, [["webhook", "connected"], ["push", "connected"]]);
+  });
+
+  test(`formal request push waits for the outer transaction (${representation ?? "legacy"})`, async t => {
+    const { store, receiver, keys, signal } = fixture(t, [], representation);
+    beat(store, receiver.identity);
+    const pushes = [];
+    store.agentHeartbeats.pushNotify = ({ id }) => pushes.push(id);
+    const command = { id: "exact-formal-open", type: "message.posted", data: {
+      messageId: "rollback-then-retry", toMemberId: "receiver", requestKind: "reply", body: "Verify the exact review."
+    } };
+    const post = () => store.command(keys.owner, "commons", command);
+    assert.throws(() => store.transaction(() => {
+      post();
+      throw new Error("forced outer rollback");
+    }), /forced outer rollback/);
+    await Promise.resolve();
+    assert.deepEqual(pushes, []);
+    assert.equal(signal(receiver.identity, command.data.messageId), undefined);
+    assert.equal(store.operationReceipt(keys.owner, "commons", command.id).status, "not_recorded");
+
+    assert.equal(post().duplicate, false);
+    assert.equal(post().duplicate, true);
+    await Promise.resolve();
+    assert.deepEqual(pushes, [command.data.messageId]);
+    assert.equal(signal(receiver.identity, command.data.messageId)?.kind, "dm");
   });
 }
 

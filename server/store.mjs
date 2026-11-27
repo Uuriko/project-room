@@ -8156,9 +8156,20 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // RC-2026-09-24-203: push doorbell — a pointer-only POST for the
         // offline agent's push subscription; the inbox pull carries the body.
         // Targeted DMs (kind "dm") ride dm.posted, @mentions ride message.posted.
-        this.agentHeartbeats.pushNotify({ identityId: identityId,
-          eventType: kind === "dm" ? "dm.posted" : "message.posted",
-          roomId, id: data.messageId ?? eventId, ts: this.now() });
+        const push = { identityId, eventType: kind === "dm" ? "dm.posted" : "message.posted",
+          roomId, id: data.messageId ?? eventId, ts: this.now() };
+        if (addressedRequest?.opening) {
+          // The formal request may be one step of a larger Room transaction.
+          // Wait for commit and confirm the exact event before notifying a host.
+          Promise.resolve().then(() => {
+            const committed = this.db.prepare(
+              "SELECT 1 FROM events JOIN rooms ON rooms.id=events.room_id WHERE events.id=? AND events.room_id=? AND rooms.archived_at IS NULL"
+            ).get(eventId, roomId);
+            if (committed) this.agentHeartbeats.pushNotify(push);
+          }).catch(() => {});
+        } else {
+          this.agentHeartbeats.pushNotify(push);
+        }
       }
       delivery.push(this.messageWakeDisposition(roomId, memberId, woken || nativeQueued > 0 || pullQueued));
     }

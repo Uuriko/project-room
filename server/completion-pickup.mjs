@@ -4,6 +4,7 @@ import { atomicPrivateJson, readPrivateJson } from "../room-acp/src/private-file
 import { validId } from "../src/events.js";
 import { isCurrentRoom } from "./current-room-repository.mjs";
 import { listRoomWork } from "./mcp-room-profile.mjs";
+import { recipientWorkAvailability } from "./room-next.mjs";
 import { capacityHandoff, capacityWorkHandoff, compileCapacityHandoff, compileCapacityWork, compileIdleRefill, idleRefill, investigation } from "./completion-capacity.mjs";
 
 const pickupRetryDelaysMs = [1000, 2000, 4000, 8000, 16000, 32000];
@@ -100,35 +101,39 @@ export function dispatchCompletionPickup(store, route, secret, event, sequence) 
   if (event.type !== "message.posted" || event.actorId !== recipientId
       || event.data.responseOutcome !== "answered" || event.data.workItemId !== workItemId
       || !validId(requestMessageId)) return "unrelated";
-  if (store.authenticate(secret, roomId).member.id !== requesterId) throw Error("Pickup requester identity changed");
-  const exact = store.replyRequests.selected(secret, roomId, requestMessageId, { view: "compact" });
-  const { request, page } = exact;
-  if (request.requesterId !== requesterId || request.recipientId !== recipientId || request.workItemId !== workItemId
-      || request.terminalEventId !== event.id || request.status !== "answered") return "not_current";
-  const opened = page.items.find(item => item.kind === "opened");
-  if (!opened?.message?.body || opened.message.body.includes(investigation)) return "no_successor";
-  // Share the operation key with the supervised pickup to make migration and
-  // replay of the same settlement harmless in either direction.
-  const requestId = "investigate-" + createHash("sha256").update(roomId + "/" + event.id).digest("hex").slice(0, 32);
-  if (store.operationReceipt(secret, roomId, requestId).status === "recorded") return "replayed";
-  if (store.wakeQueue.pauseStatus(roomId, recipientId)) return "paused";
-  const checkedThrough = store.headSequence(roomId);
-  if (recipientHasOpenRequest(store, route)) return "ready_or_unknown";
-  const offers = listRoomWork(store, secret, { roomId, focus: "help_wanted", limit: 1 });
-  if (offers.selection?.available === false || offers.work.length || offers.page?.hasMore
-      || offers.evaluatedThrough !== checkedThrough) return "ready_or_unknown";
-  const command = buildReplyCommand({ roomId, memberId: requesterId }, "room_request_reply", {
-    requestId, workItemId, toMemberId: recipientId,
-    body: [
-      ...(firstLine === undefined ? [`@(${recipientId}) ${investigation}`] : [firstLine, investigation]),
-      `The authorized QA request ${requestMessageId} settled at room sequence ${sequence}.`,
-      "Check your actionable pickup first, excluding this request itself. If a different actionable assignment exists, report it and stop this investigation.",
-      "Otherwise take one bounded evidence lead from pickup, or use your last result to investigate a distinct, currently observable problem within the same scope.",
-      "Return your exact source or revision, one observed result, and one checkable next action with an intended recipient. A clean check is useful. Read-only QA; keep evidence within its authorized audience."
-    ].join("\n")
-  });
   try {
-    return store.command(secret, roomId, command).duplicate ? "replayed" : "posted";
+    return store.transaction(() => {
+      if (store.authenticate(secret, roomId).member.id !== requesterId) throw Error("Pickup requester identity changed");
+      const exact = store.replyRequests.selected(secret, roomId, requestMessageId, { view: "compact" });
+      const { request, page } = exact;
+      if (request.requesterId !== requesterId || request.recipientId !== recipientId || request.workItemId !== workItemId
+          || request.terminalEventId !== event.id || request.status !== "answered") return "not_current";
+      const opened = page.items.find(item => item.kind === "opened");
+      if (!opened?.message?.body || opened.message.body.includes(investigation)) return "no_successor";
+      // Share the operation key with the supervised pickup to make migration and
+      // replay of the same settlement harmless in either direction.
+      const requestId = "investigate-" + createHash("sha256").update(roomId + "/" + event.id).digest("hex").slice(0, 32);
+      if (store.operationReceipt(secret, roomId, requestId).status === "recorded") return "replayed";
+      if (store.wakeQueue.pauseStatus(roomId, recipientId)) return "paused";
+      const checkedThrough = store.headSequence(roomId);
+      if (recipientHasOpenRequest(store, route)
+          || recipientWorkAvailability(store, roomId, recipientId, { allowWaiting: true }) !== "clear")
+        return "ready_or_unknown";
+      const offers = listRoomWork(store, secret, { roomId, focus: "help_wanted", limit: 1 });
+      if (offers.selection?.available === false || offers.work.length || offers.page?.hasMore
+          || offers.evaluatedThrough !== checkedThrough) return "ready_or_unknown";
+      const command = buildReplyCommand({ roomId, memberId: requesterId }, "room_request_reply", {
+        requestId, workItemId, toMemberId: recipientId,
+        body: [
+          ...(firstLine === undefined ? [`@(${recipientId}) ${investigation}`] : [firstLine, investigation]),
+          `The authorized QA request ${requestMessageId} settled at room sequence ${sequence}.`,
+          "Check room_next with view=pickup first and follow all Work and request continuation pages, excluding this request itself. If other work is actionable, decline this investigation and follow that work. If coverage or eligibility is uncertain, decline and say what could not be confirmed.",
+          "Otherwise take one bounded evidence lead from pickup, or use your last result to investigate a distinct, currently observable problem within the same scope.",
+          "Return your exact source or revision, one observed result, and one checkable next action with an intended recipient. A clean check is useful. Read-only QA; keep evidence within its authorized audience."
+        ].join("\n")
+      });
+      return store.command(secret, roomId, command).duplicate ? "replayed" : "posted";
+    });
   } catch (error) {
     if (error.code === "assignment_paused" || error.code === "assignment_waiting_for_recipient") return "recipient_unavailable";
     throw error;
