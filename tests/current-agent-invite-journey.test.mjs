@@ -70,16 +70,24 @@ test('existing agent lost-response retry preserves identity/grants and finishes 
  assert.equal(first.starter,undefined);
  const cmd=(key,id,type,data)=>s.command(key,'commons',{id,type,data}),item=()=>JSON.parse(s.db.prepare("SELECT body FROM work_entities WHERE work_id='task'").get().body);
  cmd(ownerKey,'propose','work.proposed',{workItemId:'task',title:'Useful shared task',definitionOfDone:'Save and review useful result',accountableMemberId:first.memberId,verifierMemberId:'reviewer',independentVerificationRequired:true,ownerDecisionRequired:true,humanDecisionMakerId:'owner',mode:'read'});
+ cmd(ownerKey, 'propose-next', 'work.proposed', {
+  workItemId: 'task-next', title: 'Check the next artifact', definitionOfDone: 'Return a cited QA finding',
+  accountableMemberId: peer.identityId, mode: 'read'
+ });
  async function mcp(pointer, token=first.mcpToken.credential){
   const res=await fetch(new URL(endpoint.pathname, origin),{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
    body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:pointer.tool,arguments:pointer.arguments}})});
   return (await res.json()).result;
  }
- const pickup=await mcp(first.nextWork);
- assert.equal(pickup?.isError,undefined);
- assert.equal(pickup.structuredContent.viewerId,peer.identityId);
- assert.equal(pickup.structuredContent.nextRead.arguments.workItemId,'task');
- const brief=await mcp(pickup.structuredContent.nextRead);
+ const accessPointer={tool:'room_check_access',arguments:{roomId:'commons'}};
+ const beforeAccess=s.headSequence('commons');
+ const coldAccess=await mcp(accessPointer);
+ assert.equal(coldAccess?.isError,undefined);
+ assert.equal(coldAccess.structuredContent.initialPickup.viewerId,peer.identityId);
+ assert.equal(coldAccess.structuredContent.initialPickup.nextRead.arguments.workItemId,'task');
+ assert.ok(coldAccess.structuredContent.initialPickup.work.items.some(row=>row.id==='task-next'));
+ assert.equal(s.headSequence('commons'),beforeAccess);
+ const brief=await mcp(coldAccess.structuredContent.initialPickup.nextRead);
  assert.equal(brief.structuredContent.continuation.action,'accept');
  const fallback=await mcp(first.nextWork.fallback);
  assert.ok(fallback.structuredContent.work.some(item=>item.id==='task'));
@@ -113,14 +121,18 @@ test('existing agent lost-response retry preserves identity/grants and finishes 
   assert.equal(event.actorId, peer.identityId);
   assert.equal(event.data.workItemId, workItemId);
  };
- const begin = await peerCall('room_begin_work', { workItemId: 'task', expectedRevision: 0 });
+ const beginInput = { workItemId: 'task', expectedRevision: 0 };
+ const begin = await peerCall('room_begin_work', beginInput);
  assert.equal(begin.working, true);
  assert.deepEqual(begin.confirmed.map(row => row.action), ['room_accept_work', 'room_start_work']);
  assertStartedEvent(begin.confirmed[1].eventId, 'task');
  const throughStart = s.headSequence('commons');
+ const replayedStart = await peerCall('room_begin_work', beginInput);
+ assert.equal(replayedStart.confirmed[1].eventId, begin.confirmed[1].eventId);
+ assert.equal(s.headSequence('commons'), throughStart);
  await disconnect();
  await connect();
- const resumed = await peerCall('room_next', { view: 'pickup' });
+ const resumed = (await peerCall('room_check_access', {})).initialPickup;
  assert.equal(resumed.viewerId, peer.identityId);
  assert.equal(resumed.nextRead.arguments.workItemId, 'task');
  assert.equal(resumed.work.items.find(row => row.id === 'task').reason, 'in_progress');
@@ -137,10 +149,6 @@ test('existing agent lost-response retry preserves identity/grants and finishes 
   evidenceVersion: version, previousCompletionEventId: null, producerId: peer.identityId,
   summary: 'Saved useful work', nextAction: 'Independent review', requestId: 'done'
  };
- cmd(ownerKey, 'propose-next', 'work.proposed', {
-  workItemId: 'next-task', title: 'Check the next artifact', definitionOfDone: 'Return a cited QA finding',
-  accountableMemberId: peer.identityId, mode: 'read'
- });
  const done = await peerCall('room_submit_text_result', resultInput);
  assert.equal(done.result.read.arguments.completionEventId, done.eventId);
  const replayedResult = await peerCall('room_submit_text_result', resultInput);
@@ -149,14 +157,14 @@ test('existing agent lost-response retry preserves identity/grants and finishes 
  assert.deepEqual(replayedResult.nextPickup, done.nextPickup);
  assert.deepEqual(done.nextPickup, { tool: 'room_next', arguments: { roomId: 'commons', view: 'pickup' } });
  const next = await peerCall(done.nextPickup.tool, done.nextPickup.arguments);
- assert.equal(next.nextRead.arguments.workItemId, 'next-task');
+ assert.equal(next.nextRead.arguments.workItemId, 'task-next');
  const nextWork = await peerCall(next.nextRead.tool, next.nextRead.arguments);
- const second = await peerCall('room_begin_work', { workItemId: 'next-task', expectedRevision: nextWork.revision });
+ const second = await peerCall('room_begin_work', { workItemId: 'task-next', expectedRevision: nextWork.revision });
  assert.equal(second.working, true);
  assert.deepEqual(second.confirmed.map(row => row.action), ['room_accept_work', 'room_start_work']);
- assertStartedEvent(second.confirmed[1].eventId, 'next-task');
+ assertStartedEvent(second.confirmed[1].eventId, 'task-next');
  assert.notEqual(second.confirmed[1].eventId, begin.confirmed[1].eventId);
- const secondRead = await peerCall('room_read_work', { workItemId: 'next-task' });
+ const secondRead = await peerCall('room_read_work', { workItemId: 'task-next' });
  assert.equal(secondRead.work.state, 'working');
  assert.equal(item().state, 'completed');
 

@@ -710,6 +710,9 @@ for (const normalized of [false, true]) test(`OAuth work:write lifecycle fits th
     assert.notEqual(response.body.result?.isError, true, `${name}: ${JSON.stringify(response.body).slice(0, 300)}`);
     return reviewed(response.body);
   };
+  const arrival = reviewed((await f.rpc('tools/call', { name: 'room_check_access', arguments: {} })).body);
+  assert.equal(arrival.initialPickup.nextRead.arguments.workItemId, workItemId);
+  assert.equal(arrival.initialPickup.viewerId, 'friend-dot');
   await call('room_accept_work', { expectedRevision: 0, requestId: 'life-accept' });
   await call('room_start_work', { expectedRevision: 1, requestId: 'life-start' });
   await call('room_block_work', { expectedRevision: 2, reason: 'Waiting on an input', nextAction: 'Owner supplies it', requestId: 'life-block' });
@@ -891,6 +894,7 @@ test('room next and receipt discovery distinguish server availability from a nar
   });
   assert.equal(narrowAccess.body.result.structuredContent.commandDiscovery.incomingRequestRead, undefined);
   assert.equal(narrowAccess.body.result.structuredContent.commandDiscovery.reconnectPickup, undefined);
+  assert.equal(narrowAccess.body.result.structuredContent.initialPickup, undefined);
   assert.doesNotMatch(narrowAccess.body.result.structuredContent.nativeMonitoring.next, /room_list_requests|reconnectPickup/);
   for (const name of ['room_next', 'room_receipt']) assert.ok(!narrowList.body.result.tools.some(entry => entry.name === name));
   const denied = await f.rpc('tools/call', { name: tool, arguments: {} }, partial);

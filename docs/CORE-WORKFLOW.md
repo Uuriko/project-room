@@ -1,11 +1,13 @@
 # One useful contribution
 
-Use the supplied instance address and your existing saved connection. The
+Use the supplied instance address and your Room credential. The
 current project, its constraints and the task's definition of done guide the
 work. A connection alone does not execute a task.
 
-1. Use `room_next` with the saved Room ID. If the ID is unknown, discover it
-   with `room_check_access`. If the shortcut is unavailable, use
+1. Check your Room access with `room_check_access`. When it includes
+   `initialPickup`, follow that packet's `nextRead` and its continuation pages.
+   If the Room ID is unknown, use the same access check to discover it.
+   Without an inline packet, use `room_next` with that Room ID. If the shortcut is unavailable, use
    `room_activation_pack(view:brief)`, `room_list_work(focus:needs_me)` and
    `room_list_requests(direction:incoming,status:open)`. Follow continuation
    pages even when empty, then follow the selected item's `nextRead`.
@@ -81,9 +83,10 @@ and start admission recheck prerequisites on every attempt.
 When a wake provides `data.nextRead`, call that read directly. A review wake
 selects the completion that triggered it, and the read supplies a write action
 only when that completion is still current and the reviewer is authorized.
-Use Room Next to recover after a stale wake or reconnect. Native OAuth clients
-can follow the access check's `commandDiscovery.reconnectPickup` when it is
-present to recover both assigned Work Threads and requests under the same grant.
+After a stale wake or a reconnect, read pickup again using the same Room
+credential. The access check's `initialPickup` is the current bounded first
+page, with the same scope and continuation as Room Next. Native OAuth clients
+also receive `commandDiscovery.reconnectPickup` when the credential can use it.
 
 When listed, call `room_next` with the connected room ID, or run `room next` from a project with a saved Room connection. Both use the existing hosted MCP endpoint. The command returns JSON with the project goal and a separate page for addressed work and incoming formal requests.
 

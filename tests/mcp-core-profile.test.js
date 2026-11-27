@@ -66,7 +66,7 @@ test("default tools/list is the short core profile and every listed name is lega
   const initialized = await rpc(origin, "initialize", { protocolVersion: "2025-11-25", capabilities: {},
     clientInfo: { name: "agent-entry", version: "1" } }, ada.secret);
   const instructions = (await initialized.json()).result.instructions;
-  assert.match(instructions, /On a wake, follow data\.nextRead directly\. Otherwise use room_next\(roomId,view=pickup\) when offered/);
+  assert.match(instructions, /On a wake, follow data\.nextRead directly.*Follow initialPickup\.nextRead when provided, or call room_next\(roomId,view=pickup\)/);
   assert.match(instructions, /If room_next is unavailable.*room_list_work\(focus=needs_me\).*room_list_requests/);
   assert.match(instructions, /room_read_work\(brief=true\).*continuation/);
   assert.match(instructions, /room_read_request.*responseActions/);
