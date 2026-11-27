@@ -1,7 +1,19 @@
 #!/usr/bin/env node
-// Board, referral, receipts opt-in, sweep, status, and wake-pause matrix.
+// Native work lifecycle, referral, receipts opt-in, sweep, status, and
+// wake-pause matrix for a current-format (native) room.
 // Roles: owner, contribute, chat, review, manage_claims, write_external,
-// link guest, public. The policy is the one SEC-1 and SEC-2 implement.
+// link guest, public. The policy is the one SEC-1 and SEC-2 implement for
+// the surfaces that are live in a native room: work travels the command
+// bus (propose / accept / start / complete / verify), and the retired
+// Board is pinned as refused or denied — Board writers get 409
+// legacy_work_retired, non-writers the Board gate, anonymous 401.
+// The legacy held-claim rows (claim / update / renew / release /
+// reassign / attestation / verdict on Board claims) were removed when
+// the Board retired in current rooms: their native equivalents are the
+// lifecycle rows below. Do not relax the production retirement guard to
+// revive them — seed native fixtures instead. (This harness originally
+// failed exactly there: qa3-gates run 43056303231, exit 2 at the old
+// Board claim seeding.)
 // A cell whose fix has not merged is expectedFail with its finding id:
 // the run stays green, and turns red once the fix matches while the flag
 // is still set.
@@ -11,7 +23,7 @@
 // seedReferralTokens below), so --db or ROOM_DB must name the server's
 // database file, as with content-trust.
 import { argv, exit } from "node:process";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { createQaClient } from "../qa2/lib/client.mjs";
 import { assertLocalOrigin, createReport } from "./lib/summary.mjs";
@@ -29,23 +41,39 @@ const MEMBERS = ROLES.filter(role => role !== "public");
 const WRITERS = ["owner", "contribute", "review"];
 
 // Intended policy. expectedFail names the finding whose fix has not merged.
-// refused: writers must be refused with 422 invalid_claim_input (SEC-2 §3).
+// refused: writers must be refused with 422 invalid_claim_input (SEC-2 §3)
+// or, on the retired Board, 409 legacy_work_retired.
+// Native lifecycle rows classify command_rejected (400/409/422) as deny
+// (denyAs422): a member who may not take a lifecycle step is refused by
+// the command bus, which is the native room's deny. propose needs the
+// steer permission (owner); accept / start / complete need accept_work /
+// complete_work and accountability for the item (owner, contribute);
+// verify needs the verify permission and designation as the item's
+// verifier (owner, review).
 const POLICY = {
-  "create work claim": { allow: WRITERS },
-  "claim work": { allow: WRITERS },
-  "update held claim": { allow: WRITERS },
-  "renew held claim": { allow: WRITERS },
-  "release claim": { allow: ["owner", "contribute", "review", "manage_claims"] },
-  "reassign claim": { allow: ["owner", "contribute", "review", "manage_claims"] },
-  "attestation note": { allow: ["owner", "review", "manage_claims"] },
-  "verdict review": { allow: ["owner", "review"] },
+  "propose work": { allow: ["owner"], denyAs422: true },
+  "accept work": { allow: ["owner", "contribute"], denyAs422: true },
+  "start work": { allow: ["owner", "contribute"], denyAs422: true },
+  "complete work": { allow: ["owner", "contribute"], denyAs422: true },
+  "verify work": { allow: ["owner", "review"], denyAs422: true },
+  "legacy board create": { allow: [], refused: WRITERS },
   "sweep": { allow: ["owner", "contribute", "review", "manage_claims"] },
   "board status": { allow: MEMBERS },
   // Referral minting is parked (#3218): nobody may mint. Authenticated
   // callers get 410 referral_invites_parked, anonymous 401 — both classify
   // as deny (parkedAsDeny maps the 410).
   "referral mint": { allow: [], parkedAsDeny: true },
-  "referral redeem": { allow: ROLES },
+  // expectedFail: redeem is refused 409 current_room_context_required
+  // for every role in a current-format room — ReferralInvites.redeem
+  // reads the room through the legacy projection (store.room), which
+  // current rooms refuse. The cure is a production fix to the redeem
+  // path's room read, not a harness change, and it has not merged;
+  // until it does, these cells are expectedFail and the run turns red
+  // once redeem matches, so the flag is removed then.
+  "referral redeem": {
+    allow: ROLES,
+    expectedFail: Object.fromEntries(ROLES.map(role => [role, "referral-redeem-current-room"])),
+  },
   "receipts opt-in": { allow: ["owner"], denyAs422: true },
   "pause own wakes": { allow: MEMBERS },
   "pause another member": { allow: ["owner"] },
@@ -169,109 +197,105 @@ try {
     body: { linkToken, displayName: `Qa3link${stamp}` },
   }), "join linkguest");
 
-  const claimBy = async (id, holder) => {
-    must(await client.request("POST", `${roomPath}/work-claims`, {
-      token: tokens.owner,
-      body: { id, title: id },
-    }), `create ${id}`);
-    must(await client.request("POST", `${roomPath}/work-claims/${id}/claim`, {
-      token: tokens[holder],
-      body: { note: "held", leaseHours: 1 },
-    }), `claim ${id} as ${holder}`);
+  // Native lifecycle fixtures. Each matrix row seeds its own item
+  // through the command bus: the owner proposes it with the tested role
+  // as the accountable member. (The public role has no membership, so
+  // the owner stands in as accountable and the row observes the
+  // anonymous refusal instead.) This replaces the retired Board claim
+  // seeding that tripped legacy_work_retired at this point in the file.
+  const command = (role, type, data) => client.request("POST", `${roomPath}/commands`, {
+    token: tokens[role],
+    body: cmd(type, data),
+  });
+  const accountableFor = role => (memberIds[role] ? role : "owner");
+  const proposeFor = async (id, accountableRole, extra = {}) => {
+    must(await command("owner", "work.proposed", {
+      workItemId: id, title: id, definitionOfDone: "qa3 result recorded",
+      accountableMemberId: memberIds[accountableRole], mode: "read", ...extra,
+    }), `propose ${id}`);
   };
-
-  const held = {};
-  for (const role of WRITERS) {
-    held[`update:${role}`] = `upd-${role}`;
-    held[`renew:${role}`] = `ren-${role}`;
-    await claimBy(`upd-${role}`, role);
-    await claimBy(`ren-${role}`, role);
-  }
-  await claimBy("upd-deny", "contribute");
-  await claimBy("ren-deny", "contribute");
-  for (const role of ["owner", "contribute", "review", "manage_claims"]) {
-    const holder = role === "owner" || role === "manage_claims" ? "review" : role;
-    held[`release:${role}`] = `rel-${role}`;
-    held[`reassign:${role}`] = `reas-${role}`;
-    await claimBy(`rel-${role}`, holder);
-    await claimBy(`reas-${role}`, holder);
-  }
-  await claimBy("rel-deny", "contribute");
-  await claimBy("reas-deny", "contribute");
-  await claimBy("attest-1", "owner");
-  await claimBy("verdict-1", "contribute");
-  for (const role of ROLES) {
-    must(await client.request("POST", `${roomPath}/work-claims`, {
-      token: tokens.owner,
-      body: { id: `clm-${role}`, title: `clm-${role}` },
-    }), `create clm-${role}`);
-  }
+  // Attempt accept + start as the accountable member, ignoring refusals:
+  // a member without accept_work stays at revision 0, which is exactly
+  // what the classified step in the row then observes.
+  const acceptAndStart = async (id, role) => {
+    await command(role, "work.accepted", { workItemId: id, expectedRevision: 0 });
+    await command(role, "work.started", { workItemId: id, expectedRevision: 1 });
+  };
+  // Post the result text and complete the item as its accountable
+  // member. Returns the work.completed response plus the evidence
+  // version, for rows that continue to verification.
+  const completeAs = async (id, role) => {
+    const body = `result ${id} ${stamp}`;
+    const messageId = randomUUID();
+    const posted = await command(role, "message.posted", { messageId, body, workItemId: id });
+    const evidenceVersion = `sha256:${createHash("sha256").update(body, "utf8").digest("hex")}`;
+    const response = await command(role, "work.completed", {
+      workItemId: id, expectedRevision: 2, evidenceKind: "room_text",
+      evidenceMessageId: messageId, evidenceMessageEventId: posted.json?.event?.id ?? "missing-event",
+      evidenceVersion, previousCompletionEventId: null,
+      producerId: memberIds[role] ?? memberIds.owner,
+      summary: `result ${id}`, nextAction: "verify",
+    });
+    return { response, evidenceVersion };
+  };
 
   const referralTokens = seedReferralTokens(roomId, memberIds.owner, ROLES.length);
 
   const call = {
-    "create work claim": role => client.request("POST", `${roomPath}/work-claims`, {
+    "propose work": role => command(role, "work.proposed", {
+      workItemId: `prop-${role}-${stamp}`, title: `prop ${role}`,
+      definitionOfDone: "qa3 result recorded",
+      accountableMemberId: memberIds[accountableFor(role)], mode: "read",
+    }),
+    // Accept is the native claim step: only the accountable member, and
+    // only with accept_work, may take an item.
+    "accept work": async role => {
+      const id = `acc-${role}-${stamp}`;
+      await proposeFor(id, accountableFor(role));
+      return command(role, "work.accepted", { workItemId: id, expectedRevision: 0 });
+    },
+    "start work": async role => {
+      const id = `start-${role}-${stamp}`;
+      await proposeFor(id, accountableFor(role));
+      await command(role, "work.accepted", { workItemId: id, expectedRevision: 0 });
+      return command(role, "work.started", { workItemId: id, expectedRevision: 1 });
+    },
+    "complete work": async role => {
+      const id = `done-${role}-${stamp}`;
+      await proposeFor(id, accountableFor(role));
+      await acceptAndStart(id, role);
+      return (await completeAs(id, role)).response;
+    },
+    // Verification is by the item's designated verifier alone. The
+    // producer is a different member from the tested verifier (the
+    // contribute member, or the owner when contribute is the tested
+    // role): independent verification requires that split, and the
+    // owner row is then an independent verification, not a
+    // self-verification.
+    "verify work": async role => {
+      const id = `ver-${role}-${stamp}`;
+      const producer = role === "contribute" ? "owner" : "contribute";
+      await proposeFor(id, producer, {
+        independentVerificationRequired: true,
+        verifierMemberId: memberIds[accountableFor(role)],
+      });
+      await acceptAndStart(id, producer);
+      const { response: completed, evidenceVersion } = await completeAs(id, producer);
+      if (completed.status < 200 || completed.status >= 300) {
+        throw new Error(`verify setup for ${role}: completion HTTP ${completed.status} ${completed.text.slice(0, 160)}`);
+      }
+      return command(role, "verification.recorded", {
+        workItemId: id, expectedRevision: 3, result: "pass",
+        completionEventId: completed.json?.event?.id, evidenceVersion,
+        summary: `verify ${role}`,
+      });
+    },
+    // The retired Board stays retired: a create in a native room is
+    // refused for Board writers (409 legacy_work_retired) and denied for
+    // everyone else (Board gate 403, anonymous 401).
+    "legacy board create": role => client.request("POST", `${roomPath}/work-claims`, {
       token: tokens[role],
       body: { id: `new-${role}-${stamp}`, title: `new ${role}` },
-    }),
-    "claim work": role => client.request("POST", `${roomPath}/work-claims/clm-${role}/claim`, {
-      token: tokens[role],
-      body: { note: "claim", leaseHours: 1 },
-    }),
-    "update held claim": role => client.request("POST", `${roomPath}/work-claims/${held[`update:${role}`] ?? "upd-deny"}/update`, {
-      token: tokens[role],
-      body: { state: "in_progress", note: "progress" },
-    }),
-    "renew held claim": async role => {
-      const id = held[`renew:${role}`] ?? "ren-deny";
-      let progressMessageId = "missing-progress";
-      if (held[`renew:${role}`]) {
-        progressMessageId = randomUUID();
-        const posted = await client.request("POST", `${roomPath}/commands`, {
-          token: tokens[role],
-          body: cmd("message.posted", { messageId: progressMessageId, body: `progress ${role} ${stamp}` }),
-        });
-        if (posted.status < 200 || posted.status >= 300) {
-          throw new Error(`renew progress for ${role}: HTTP ${posted.status} ${posted.text.slice(0, 160)}`);
-        }
-      }
-      return client.request("POST", `${roomPath}/work-claims/${id}/renew`, {
-        token: tokens[role],
-        body: { progressMessageId },
-      });
-    },
-    "release claim": async role => {
-      // E5/D4 (QA-200 2026-10-08): /release binds the claim round the client read.
-      const id = held[`release:${role}`] ?? "rel-deny";
-      const read = await client.request("GET", `${roomPath}/work-claims/${id}`, {
-        token: tokens[role],
-      });
-      const item = read.json?.claim ?? read.json;
-      return client.request("POST", `${roomPath}/work-claims/${id}/release`, {
-        token: tokens[role],
-        body: { note: "release", expectedClaimedAt: item?.claimedAt,
-          expectedHistoryLength: (item?.history?.length ?? 0) + (item?.historyOmitted ?? 0) },
-      });
-    },
-    "reassign claim": async role => {
-      // /reassign binds the claim round the client read, like /release.
-      const id = held[`reassign:${role}`] ?? "reas-deny";
-      const read = await client.request("GET", `${roomPath}/work-claims/${id}`, { token: tokens[role] });
-      const item = read.json?.claim ?? read.json;
-      return client.request("POST", `${roomPath}/work-claims/${id}/reassign`, {
-        token: tokens[role],
-        body: { newOwner: role === "contribute" ? memberIds.owner : memberIds.contribute, note: "reassign",
-          expectedClaimedAt: item?.claimedAt ?? null,
-          expectedHistoryLength: (item?.history?.length ?? 0) + (item?.historyOmitted ?? 0) },
-      });
-    },
-    "attestation note": role => client.request("POST", `${roomPath}/work-claims/attest-1/review`, {
-      token: tokens[role],
-      body: { note: `attest ${role}` },
-    }),
-    "verdict review": role => client.request("POST", `${roomPath}/work-claims/verdict-1/review`, {
-      token: tokens[role],
-      body: { verdict: "comment", summary: `verdict ${role}` },
     }),
     "sweep": role => client.request("POST", `${roomPath}/work-claims/sweep`, { token: tokens[role], body: {} }),
     "board status": role => client.request("GET", `${roomPath}/work-claims/status`, { token: tokens[role] }),

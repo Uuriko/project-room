@@ -2,12 +2,20 @@
 // Nightly board-growth budget: 400 done claims plus 300 review notes from
 // five review-profile members. List p95, the limit=1 body, and room-event
 // headroom stay bounded (SEC-2 with Q3-A: F4 event headroom, F8 list).
+// Native-room edition: the 400 done claims stay as an explicitly legacy
+// terminal fixture (see the seeding note below), the active item is a
+// native work item, and the review notes are native discussion messages
+// on it. Do not relax the production retirement guard to revive the
+// legacy active-claim fixture — that was this harness's original failure
+// (qa3-gates run 43056303231, exit 2 at the active-claim seeding).
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { RoomStore } from "../../server/store.mjs";
 import { createRoomServer } from "../../server/http.mjs";
 import { createWork, claimWork, updateWork } from "../../server/work-claims.mjs";
+import { readCurrentHead } from "../../server/current-room-repository.mjs";
 import { createQaClient } from "../qa2/lib/client.mjs";
 import { createReport } from "./lib/summary.mjs";
 
@@ -47,6 +55,11 @@ try {
       body: { title: `qa3-growth-${stamp}`, purpose: "QA3 board growth throwaway room" },
     }), "create room").roomId;
     const roomPath = `/api/rooms/${encodeURIComponent(roomId)}`;
+    // Retained legacy contract fixture, explicitly legacy: the 400 done
+    // claims are terminal, so the production retirement guard
+    // (server/store.mjs beforeSet) admits them in a current-format room,
+    // and the Board list read they populate below remains available
+    // there. They are the growth population for the list budget.
     const seededAt = Date.now() - 86_400_000;
     for (let i = 0; i < DONE; i++) {
       let item = createWork({ id: `done-${i}`, title: `done ${i}` }, { now: seededAt, agentId: owner.identityId });
@@ -55,13 +68,19 @@ try {
       item = updateWork(item, owner.identityId, { state: "done", note: "finished", now: seededAt });
       store.workClaims.set(roomId, item);
     }
-    const activeAt = Date.now();
-    let active = createWork({ id: "active-review", title: "review me" }, { now: activeAt, agentId: owner.identityId });
-    active = claimWork(active, owner.identityId, { now: activeAt, leaseHours: 24 });
-    active = updateWork(active, owner.identityId, { state: "in_progress", now: activeAt });
-    store.workClaims.set(roomId, active);
+    // The active item is a NATIVE lifecycle fixture: seeding it as a
+    // nonterminal legacy claim tripped legacy_work_retired in a
+    // current-format room, so it is proposed, accepted, and started
+    // through the command bus instead, with the owner accountable.
+    let serial = 0;
+    const send = (type, data) => store.command(owner.secret, roomId, { id: `qa3-growth-${stamp}-${serial++}`, type, data });
+    send("work.proposed", { workItemId: "active-review", title: "review me", definitionOfDone: "reviewed", accountableMemberId: owner.identityId, mode: "read" });
+    send("work.accepted", { workItemId: "active-review", expectedRevision: 0 });
+    send("work.started", { workItemId: "active-review", expectedRevision: 1 });
 
-    const before = store.room(roomId).sequence;
+    // store.room() refuses current-format rooms; the head read is the
+    // native way to observe the room sequence.
+    const before = readCurrentHead(store.db, roomId).sequence;
     // Review notes come from review-profile members (SEC-2).
     const guests = [];
     for (let i = 0; i < GUESTS; i++) {
@@ -78,18 +97,24 @@ try {
       guests.push(guest.secret);
     }
     const perGuest = NOTES / GUESTS;
+    // Review notes are native discussion messages on the active item:
+    // the legacy /work-claims/:id/review door has no claim to attach to
+    // in a native room. Each note is exactly one room event (below).
     await Promise.all(guests.map(async (token, guestIndex) => {
       for (let i = 0; i < perGuest; i++) {
-        const response = await client.request("POST", `${roomPath}/work-claims/active-review/review`, {
+        const response = await client.request("POST", `${roomPath}/commands`, {
           token,
-          body: { note: `growth ${guestIndex}-${i}` },
+          body: {
+            id: randomUUID(), type: "message.posted",
+            data: { messageId: randomUUID(), body: `growth ${guestIndex}-${i}`, workItemId: "active-review" },
+          },
         });
         if (response.status < 200 || response.status >= 300) {
           throw new Error(`review ${guestIndex}-${i}: HTTP ${response.status} ${response.text.slice(0, 160)}`);
         }
       }
     }));
-    const after = store.room(roomId).sequence;
+    const after = readCurrentHead(store.db, roomId).sequence;
     const samples = [];
     let bytes = 0;
     const warm = await client.request("GET", `${roomPath}/work-claims?limit=1`, { token: owner.secret });
@@ -104,7 +129,12 @@ try {
     const checks = [
       { name: "list p95", ok: elapsed < LIST_P95_MS, detail: `p95 ${elapsed.toFixed(1)} ms` },
       { name: "limit=1 bytes", ok: bytes < LIST_BYTES, detail: `${bytes} bytes` },
-      { name: "event headroom", ok: after - before <= SEQUENCE_HEADROOM, detail: `sequence +${after - before}` },
+      // Legacy review notes rode inside claim history and spent no room
+      // events, so the old bound was headroom alone. A native discussion
+      // note is one room event, so the budget is one event per note plus
+      // the same headroom (guest joins land between the two reads): the
+      // bound still fails on any event amplification per note.
+      { name: "event headroom", ok: after - before <= NOTES + SEQUENCE_HEADROOM, detail: `sequence +${after - before} for ${NOTES} notes` },
     ];
     for (const check of checks) {
       if (check.ok) report.pass(`${check.name} ${check.detail}`);
