@@ -5,7 +5,8 @@ import { createCodexRuntimeHost, roomCodexHost } from "../client/codex-runtime.m
 import { openRequestJournal, runRequestOnce } from "../client/request-runner.mjs";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 
@@ -236,6 +237,73 @@ test("durable completed reconciliation keeps only final answer after disconnect"
   assert.deepEqual(await host.reconcile({ ...binding, attemptId: "another" }), { status: "not_started" });
 });
 
+test("provider usage limit is attributable to the exact failed turn and survives reopening the journal", async t => {
+  const directory = mkdtempSync(join(tmpdir(), "codex-runtime-limit-"));
+  const path = join(directory, "runtime.sqlite");
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const rpc = transport({ complete: false }), events = [];
+  const options = { rpc, scope: binding, cwd: "/tmp/project", policy: { approvalPolicy: "never", sandbox: "read-only" },
+    authorize: async () => {}, emit: event => events.push(event) };
+  const privateText = "Private provider account details";
+  const failed = { ...turn("failed"), error: { codexErrorInfo: "usageLimitExceeded", message: privateText } };
+  {
+    using db = new DatabaseSync(path);
+    // Exercise upgrading an existing journal in place.
+    db.exec(`CREATE TABLE codex_runtime_attempts (
+      id TEXT PRIMARY KEY, binding TEXT NOT NULL, thread_id TEXT, turn_id TEXT,
+      state TEXT NOT NULL, result TEXT, admitted_at INTEGER)`);
+    const host = createCodexRuntimeHost({ ...options, db });
+    const executing = host(input, { binding });
+    await waitUntil(() => events.some(event => event.type === "runtime_turn_received"));
+    rpc.event("turn/completed", { threadId: "other-thread", turn: failed });
+    rpc.event("turn/completed", { threadId: "thread-one", turn: { ...failed, id: "other-turn" } });
+    rpc.event("turn/completed", { threadId: "thread-one", turnId: "turn-one", turn: { ...failed, id: "other-turn" } });
+    assert.deepEqual({ ...db.prepare("SELECT state,failure_code FROM codex_runtime_attempts").get() },
+      { state: "inProgress", failure_code: null });
+    rpc.event("turn/completed", { threadId: "thread-one", turn: failed });
+    rpc.event("turn/completed", { threadId: "thread-one", turn: turn("failed") });
+    await assert.rejects(executing, { code: "provider_usage_limited", message: "Runtime provider usage limit reached" });
+    assert.equal(JSON.stringify(db.prepare("SELECT * FROM codex_runtime_attempts").get()).includes(privateText), false);
+    assert.deepEqual(events.filter(event => event.type === "runtime_provider_limited"), [{
+      type: "runtime_provider_limited", code: "provider_usage_limited", requestId: binding.requestId, attemptId: binding.attemptId
+    }]);
+  }
+  {
+    using db = new DatabaseSync(path);
+    rpc.request = async () => { throw new Error("Runtime unavailable"); };
+    const reopened = createCodexRuntimeHost({ ...options, db });
+    assert.deepEqual(await reopened.reconcile(binding), { status: "failed", code: "provider_usage_limited" });
+    assert.deepEqual(await reopened.reconcile({ ...binding, attemptId: "other-attempt" }), { status: "not_started" });
+    await assert.rejects(reopened(input, { binding }), /already exists/);
+  }
+});
+
+test("a provider message mentioning usage limits leaves a different structured failure unclassified", async t => {
+  const { host, rpc, events } = setup(t, { complete: false });
+  const executing = host(input, { binding });
+  await waitUntil(() => events.some(event => event.type === "runtime_turn_received"));
+  rpc.event("turn/completed", { threadId: "thread-one",
+    turn: { ...turn("failed"), error: { codexErrorInfo: "rateLimitExceeded", message: "usageLimitExceeded" } } });
+  await assert.rejects(executing, error => error.message === "Runtime turn failed" && error.code === undefined);
+  assert.deepEqual(await host.reconcile(binding), { status: "failed" });
+  assert.equal(events.some(event => event.type === "runtime_provider_limited"), false);
+});
+
+test("reconciliation classifies a missed provider failure using the original thread and turn", async t => {
+  const { db, rpc } = setup(t, { complete: false });
+  const options = { db, rpc, scope: binding, cwd: "/tmp/project", policy: { approvalPolicy: "never", sandbox: "read-only" },
+    authorize: async () => {}, timeoutMs: 10 };
+  await assert.rejects(createCodexRuntimeHost(options)(input, { binding }), /uncertain/);
+  const request = rpc.request, failed = { ...turn("failed"), error: { codexErrorInfo: "usageLimitExceeded" } };
+  rpc.request = async (method, params) => {
+    if (method !== "thread/read") return request(method, params);
+    assert.deepEqual(params, { threadId: "thread-one", includeTurns: true });
+    return { thread: { id: "thread-one", turns: [{ ...turn("completed"), id: "another-turn" }, failed] } };
+  };
+  assert.deepEqual(await createCodexRuntimeHost(options).reconcile(binding), { status: "failed", code: "provider_usage_limited" });
+  rpc.request = async () => { throw new Error("Runtime unavailable"); };
+  assert.deepEqual(await createCodexRuntimeHost(options).reconcile(binding), { status: "failed", code: "provider_usage_limited" });
+});
 
 test("structured tool approval refusal survives completed turn and adapter restart", async t => {
   const { host, rpc, db } = setup(t, { complete: false });

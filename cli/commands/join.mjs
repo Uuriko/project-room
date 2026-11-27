@@ -109,7 +109,15 @@ export async function joinCommand(argv, io = {}) {
   const { target, flags } = parse(argv);
   const name = flags.name ?? "Room agent";
   const tool = flags.tool ?? detectTool(env);
-  if (flags.setup) preflightSetup(tool, { env });
+  if (flags.setup) {
+    try { preflightSetup(tool, { env }); }
+    catch (error) {
+      if (error?.code === "codex_config_conflict") {
+        throw new Error(`${error.message} Join stopped before contacting Room. To join using your existing configuration, explicitly add --no-setup.`, { cause: error });
+      }
+      throw error;
+    }
+  }
   let joined = null;
   const loginArgs = ["--room", target, "--name", name, "--accept"];
   const code = await login(loginArgs, { ...io, out: line => { try { joined = JSON.parse(line); } catch { joined = null; } } });

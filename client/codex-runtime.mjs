@@ -8,6 +8,7 @@ import { RoomAgentClient } from "./room-agent.mjs";
 export const CODEX_RUNTIME_PROTOCOL = "rust-v0.162.1";
 const connections = new WeakMap();
 const terminal = new Set(["completed", "interrupted", "failed"]);
+const providerLimitCode = "provider_usage_limited";
 const fields = ["origin", "roomId", "memberId", "requestMessageId", "requestId", "attemptId", "roomCreatedEventId", "openingEventId"];
 const textInput = text => [{ type: "text", text, text_elements: [] }];
 
@@ -54,7 +55,7 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
     throw new Error("Runtime needs a pinned Room identity");
   db.exec(`CREATE TABLE IF NOT EXISTS codex_runtime_attempts (
     id TEXT PRIMARY KEY, binding TEXT NOT NULL, thread_id TEXT, turn_id TEXT,
-    state TEXT NOT NULL, result TEXT, admitted_at INTEGER);
+    state TEXT NOT NULL, result TEXT, admitted_at INTEGER, failure_code TEXT);
     CREATE TABLE IF NOT EXISTS codex_runtime_inputs (
     attempt_id TEXT NOT NULL, input_id TEXT NOT NULL, text TEXT NOT NULL,
     state TEXT NOT NULL, PRIMARY KEY(attempt_id,input_id));
@@ -64,8 +65,11 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
     CREATE TABLE IF NOT EXISTS codex_runtime_contexts (
     attempt_id TEXT PRIMARY KEY, input_digest TEXT NOT NULL, input_bytes INTEGER NOT NULL,
     work_brief_version TEXT);`);
-  if (!db.prepare("PRAGMA table_info(codex_runtime_attempts)").all().some(column => column.name === "admitted_at"))
+  const attemptColumns = db.prepare("PRAGMA table_info(codex_runtime_attempts)").all().map(column => column.name);
+  if (!attemptColumns.includes("admitted_at"))
     db.exec("ALTER TABLE codex_runtime_attempts ADD COLUMN admitted_at INTEGER");
+  if (!attemptColumns.includes("failure_code"))
+    db.exec("ALTER TABLE codex_runtime_attempts ADD COLUMN failure_code TEXT");
   if (!db.prepare("PRAGMA table_info(codex_runtime_outputs)").all().some(column => column.name === "phase"))
     db.exec("ALTER TABLE codex_runtime_outputs ADD COLUMN phase TEXT");
   db.exec(`CREATE TABLE IF NOT EXISTS codex_runtime_tool_blocks (
@@ -74,6 +78,9 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
   const attention = id => db.prepare("SELECT 1 FROM codex_runtime_tool_blocks WHERE attempt_id=? LIMIT 1").get(id)
     ? { attention: "tool_approval_required" } : {};
   const get = id => db.prepare("SELECT * FROM codex_runtime_attempts WHERE id=?").get(id);
+  const observation = (id, saved) => ({ status: saved.state,
+    ...(saved.state === "completed" ? { body: saved.result, ...attention(id) } : {}),
+    ...(saved.state === "failed" && saved.failure_code === providerLimitCode ? { code: providerLimitCode } : {}) });
   const patch = (id, state) => db.prepare("UPDATE codex_runtime_attempts SET state=? WHERE id=?").run(state, id);
   const ready = () => {
     if (!connections.has(rpc)) connections.set(rpc, (async () => {
@@ -110,9 +117,14 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
     const final = outputs.some(item => item.phase === "final_answer")
       ? outputs.filter(item => item.phase === "final_answer") : outputs.filter(item => item.phase === null);
     const result = turn.status === "completed" ? final.map(item => item.text).join("\n") : null;
-    db.prepare("UPDATE codex_runtime_attempts SET turn_id=?,state=?,result=?,admitted_at=coalesce(admitted_at,?) WHERE id=?")
-      .run(turn.id, saved.state === "stopping" && turn.status === "inProgress" ? "stopping" : turn.status, result, admittedAt, id);
-    return { status: get(id).state, ...(result === null ? {} : { body: result, ...attention(id) }) };
+    // Keep the bounded v2 protocol classification across duplicate terminal frames.
+    const usageLimited = turn.status === "failed" && (turn.error?.codexErrorInfo === "usageLimitExceeded"
+      || saved.state === "failed" && saved.failure_code === providerLimitCode);
+    const state = saved.state === "stopping" && turn.status === "inProgress" ? "stopping" : turn.status;
+    const failureCode = usageLimited ? providerLimitCode : null;
+    db.prepare("UPDATE codex_runtime_attempts SET turn_id=?,state=?,result=?,admitted_at=coalesce(admitted_at,?),failure_code=? WHERE id=?")
+      .run(turn.id, state, result, admittedAt, failureCode, id);
+    return observation(id, { state, result, failure_code: failureCode });
   };
   const reconcile = async binding => {
     const id = await checked(binding, "read"), saved = get(id);
@@ -120,8 +132,7 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
     if (!saved.thread_id || !saved.turn_id) throw new Error("Runtime start is uncertain; do not start another turn");
     // Exact-bound terminal notifications are durable facts. A later transport
     // loss must not erase them or require another provider request to prove them.
-    if (terminal.has(saved.state)) return { status: saved.state,
-      ...(saved.state === "completed" ? { body: saved.result, ...attention(id) } : {}) };
+    if (terminal.has(saved.state)) return observation(id, saved);
     await ready();
     const value = await rpc.request("thread/read", { threadId: saved.thread_id, includeTurns: true });
     if (value?.thread?.id !== saved.thread_id) throw new Error("Runtime returned a different thread");
@@ -217,6 +228,7 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
     const completed = new Promise((resolve, reject) => { finish = resolve; fail = reject; });
     // The response and notifications may race; only accept exact thread+turn.
     const early = [];
+    let providerLimitReported = false;
     const receive = event => {
       const saved = get(id), params = event.params;
       if (params?.threadId !== saved.thread_id) return;
@@ -225,9 +237,19 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
       if (turnId !== saved.turn_id) return;
       try {
         if (event.method === "turn/completed") {
+          if (params.turn?.id !== saved.turn_id || !terminal.has(params.turn.status)) return;
           const result = recordTurn(id, params.turn);
-          if (result.status === "completed") finish({ body: result.body, ...attention(id) });
-          else fail(new Error(`Runtime turn ${result.status}`));
+          if (result.status === "completed") {
+            finish({ body: result.body, ...(result.attention ? { attention: result.attention } : {}) });
+          } else if (result.code === providerLimitCode) {
+            if (!providerLimitReported) {
+              providerLimitReported = true;
+              try {
+                emit({ type: "runtime_provider_limited", code: result.code, requestId: binding.requestId ?? binding.runId, attemptId: binding.attemptId });
+              } catch { /* The durable classification remains readable. */ }
+            }
+            fail(Object.assign(new Error("Runtime provider usage limit reached"), { code: result.code }));
+          } else fail(new Error(`Runtime turn ${result.status}`));
         } else if (event.method === "item/started" && params.item?.type === "agentMessage") saveItem(id, { ...params.item, text: params.item.text ?? "" });
         else if (event.method === "item/completed") saveItem(id, params.item);
         else if (event.method === "item/agentMessage/delta") {

@@ -53,7 +53,20 @@ export async function superviseCodexRequests({ connection, db, directory, connec
   // so it never blocks unrelated requests.
   const reportAttention = () => Boolean(db.prepare("SELECT 1 FROM request_runs WHERE delivered=1 AND reported IN (0,2) AND attempt_id IS NOT NULL LIMIT 1").get());
   const fileAttention = () => Boolean(db.prepare("SELECT 1 FROM request_runs WHERE delivered=1 AND file_state IN ('pending','attention','expired') LIMIT 1").get());
-  const idleStatus = () => unresolved() || fileAttention() ? "recovery_pending" : reportAttention() ? "report_reconciliation_pending" : "watching_room";
+  const providerLimited = () => {
+    if (!db.prepare("PRAGMA table_info(codex_runtime_attempts)").all().some(column => column.name === "failure_code")) return false;
+    return Boolean(db.prepare(`SELECT 1 FROM codex_runtime_attempts AS runtime
+      JOIN request_runs AS journal ON journal.id = json_extract(runtime.binding,'$.requestId')
+        AND journal.attempt_id = json_extract(runtime.binding,'$.attemptId')
+      WHERE runtime.state = 'failed' AND runtime.failure_code = 'provider_usage_limited'
+        AND journal.response IS NULL
+        AND json_extract(runtime.binding,'$.origin') = ?
+        AND json_extract(runtime.binding,'$.roomId') = ?
+        AND json_extract(runtime.binding,'$.memberId') = ? LIMIT 1`).get(connection.origin, connection.roomId, connection.memberId));
+  };
+  const idleStatus = () => providerLimited() ? "provider_usage_limited"
+    : unresolved() || fileAttention() ? "recovery_pending"
+      : reportAttention() ? "report_reconciliation_pending" : "watching_room";
   const requesterAllowed = request => allowed.has(request.requesterId) && request.recipientId === connection.memberId;
   const selectRequest = request => (!selected || selected.has(request.id)) && !unresolved();
   const executionAllowed = request => requesterAllowed(request) && (!selected || selected.has(request.id));
@@ -95,7 +108,7 @@ export async function superviseCodexRequests({ connection, db, directory, connec
         emit(receipt);
         return receipt;
       } catch (error) {
-        state("recovery_pending", { runId: requestMessageId });
+        state(error?.code === "provider_usage_limited" ? error.code : "recovery_pending", { runId: requestMessageId });
         // No retry with a new ID or empty journal: saved answers replay exactly;
         // an intent without an answer remains fenced by the existing runner.
         emit({ type: "request_interrupted", requestMessageId, delivery: "unconfirmed",
@@ -109,6 +122,10 @@ export async function superviseCodexRequests({ connection, db, directory, connec
         owner.health("watching"); state(idleStatus());
       }, emit: event => {
         if (event.status === "connection_unavailable") { owner.health("retrying"); state("retrying_room"); }
+        else if (event.status === "queue_read_incomplete") { state("queue_read_incomplete"); emit(event); }
+        else if (event.status === "provider_usage_limited") {
+          state(event.status, { runId: event.requestMessageId }); emit(event);
+        }
         else if (event.status === "delivered") {
           const refused = event.runReported === "refused";
           state(refused ? "recovery_pending" : "settled", { runId: event.requestId });

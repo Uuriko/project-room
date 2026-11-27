@@ -32,7 +32,13 @@ function transport(mode) {
         threads.get(params.threadId).turns.push(turn);
         if (mode === "unknown") throw Error("Synthetic lost start acknowledgement");
         if (mode !== "hold") setTimeout(() => {
-          turn.status = "completed"; turn.items = [{ id: "answer", type: "agentMessage", text: "Synthetic linked reply" }];
+          if (mode === "limit") {
+            turn.status = "failed";
+            turn.error = { codexErrorInfo: "usageLimitExceeded", message: "Provider detail should stay private", additionalDetails: null };
+          } else {
+            turn.status = "completed";
+            turn.items = [{ id: "answer", type: "agentMessage", text: "Synthetic linked reply" }];
+          }
           event("turn/completed", { threadId: params.threadId, turn });
         }, 5);
         return { turn: { ...turn } };
@@ -103,6 +109,25 @@ test("unknown start is durable and fences successors after restart", async t => 
   f.reopen(); const next = f.run(); await delay(150); next.controller.abort(); await next.promise;
   assert.equal(f.rpc.starts, 1); assert.equal(f.connects, 1);
   assert.equal(f.db.prepare("SELECT count(*) AS n FROM request_runs WHERE response IS NULL").get().n, 1);
+});
+
+test("an exact provider limit is visible after restart without retrying or starting another request", async t => {
+  const f = await fixture(t, "limit"), firstId = f.post();
+  const firstEvents = [];
+  const first = f.run({ emit: event => firstEvents.push(event) });
+  await waitUntil(() => firstEvents.some(event => event.type === "host_status" && event.status === "provider_usage_limited"));
+  assert.equal(firstEvents.find(event => event.status === "provider_usage_limited").runId, firstId);
+  assert.doesNotMatch(JSON.stringify(firstEvents), /Provider detail should stay private/);
+  first.controller.abort(); await first.promise;
+  const nextId = f.post();
+  f.reopen();
+  const events = [];
+  const restart = f.run({ emit: event => events.push(event) });
+  await waitUntil(() => events.some(event => event.type === "host_status" && event.status === "provider_usage_limited"));
+  restart.controller.abort(); await restart.promise;
+  assert.equal(f.rpc.starts, 1);
+  assert.equal((await f.client.replyContext(firstId)).request.status, "open");
+  assert.equal((await f.client.replyContext(nextId)).request.status, "open");
 });
 
 test("durable stop interrupts owned turn and does not start successor", async t => {

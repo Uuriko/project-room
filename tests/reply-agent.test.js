@@ -393,6 +393,74 @@ test("lost delivery response reuses saved answer without executing host again", 
   assert.equal(recovered.receipt.duplicate, true);
   assert.equal(calls, 1);
 });
+test("an older oversized inbox cannot strand an answered request's saved file", async t => {
+  const f = await fixture(t), args = runner(t, f), requestMessageId = f.open("partial-inbox-recovery").command.data.messageId;
+  const { id: fileId, sha256 } = f.store.roomAttachments.stage(f.keys.producer, "commons", {
+    id: "saved-share", filename: "saved.txt", mediaType: "text/plain", data: "c2F2ZWQ=",
+  }).attachment;
+  let blockFile = true, hostCalls = 0, answerPosts = 0;
+  const connection = { ...f.config, fetchImpl: async (url, options) => {
+    const target = new URL(url);
+    if (target.pathname.endsWith("/agent-work")) {
+      return Response.json({ error: { code: target.searchParams.has("view") ? "invalid_request" : "reply_list_too_large" } }, { status: 422 });
+    }
+    if (options.method === "POST" && target.pathname.endsWith("/commands")
+      && JSON.parse(options.body).data?.responseOutcome === "answered") answerPosts++;
+    if (blockFile && target.pathname.endsWith("/commit")) throw new TypeError("file interrupted");
+    return fetch(url, options);
+  } };
+  const execute = async () => { hostCalls++; return { body: "Saved result" }; };
+  const run = { ...args, connection, requestMessageId, execute };
+  assert.equal((await runRequestOnce({ ...run, stagedFileId: fileId })).status, "file_pending");
+  const messageId = (await f.client.replyContext(requestMessageId)).request.responseMessageId;
+  blockFile = false;
+  const stop = new AbortController();
+  const statuses = [];
+  await runRequestQueue({ ...args, connection, execute, stream: false, intervalMs: 1000,
+    signal: AbortSignal.any([stop.signal, AbortSignal.timeout(5000)]),
+    emit(event) {
+      statuses.push(event.status);
+      if (event.status === "queue_read_incomplete") stop.abort();
+    } });
+  assert.deepEqual(statuses, ["delivered", "queue_read_incomplete"]);
+  const file = f.store.roomAttachments.get(f.keys.owner, "commons", fileId).attachment;
+  assert.equal(file.messageId, messageId);
+  assert.equal(file.sha256, sha256);
+  assert.equal(hostCalls, 1);
+  assert.equal(answerPosts, 1);
+});
+
+test("an oversized inbox preserves a held open attempt with a locally saved, unposted answer", async t => {
+  const f = await fixture(t), args = runner(t, f), requestMessageId = f.open("hold-under-partial-intake").command.data.messageId;
+  let writes = 0, executions = 0;
+  const disconnected = { ...f.config, fetchImpl: (url, options) => {
+    if (options.method === "POST" && new URL(url).pathname.endsWith("/commands")) throw new TypeError("Answer transport interrupted");
+    return fetch(url, options);
+  } };
+  const execute = async () => { executions++; return { body: "Unposted answer" }; };
+  await assert.rejects(runRequestOnce({ ...args, connection: disconnected, requestMessageId, execute }), /transport interrupted/);
+  const before = args.db.prepare("SELECT attempt_id,response,delivered FROM request_runs").get();
+  await f.client.requestRuns({ requestMessageId, attemptId: before.attempt_id, action: "needs_attention" });
+  const connection = { ...f.config, fetchImpl: (url, options) => {
+    if (options.method === "POST") writes++;
+    const target = new URL(url);
+    if (target.pathname.endsWith("/agent-work"))
+      return Response.json({ error: { code: target.searchParams.has("view") ? "invalid_request" : "reply_list_too_large" } }, { status: 422 });
+    return fetch(url, options);
+  } };
+  const stop = new AbortController();
+  const statuses = [];
+  await runRequestQueue({ ...args, connection, execute, stream: false, intervalMs: 1000,
+    signal: AbortSignal.any([stop.signal, AbortSignal.timeout(5000)]),
+    emit(event) { statuses.push(event.status); stop.abort(); } });
+  assert.deepEqual(statuses, ["queue_read_incomplete"]);
+  assert.deepEqual(args.db.prepare("SELECT attempt_id,response,delivered FROM request_runs").get(), before);
+  assert.equal((await f.client.requestRuns()).runs[requestMessageId].state, "needs_attention");
+  assert.equal((await f.client.replyContext(requestMessageId)).request.status, "open");
+  assert.equal(writes, 0);
+  assert.equal(executions, 1);
+});
+
 test("a lost 'delivered' run report is surfaced and retried until the service records it", async t => {
   const f = await fixture(t), args = runner(t, f), requestMessageId = f.open("host-report-lost").command.data.messageId;
   let calls = 0, dropped = 0;

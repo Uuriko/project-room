@@ -1,8 +1,33 @@
 // One authorized read boundary for agent pickup. This is an observation, never
 // a reservation or permission to execute. Reuse the existing request semantics.
+import { createHash } from "node:crypto";
+import { conversationCursorCodec } from "../conversation-sync.mjs";
 import { observeSelectedRuns, validateSelectedRunOpenings } from "../request-runs.mjs";
 import {isCurrentRoom,readCurrentRecord,withCurrentReadContext} from '../current-room-repository.mjs';
 import { ownMember } from "../../src/events.js";
+
+const PAGE_SIZE = 4;
+const validCursor = value => typeof value === "string" && /^[A-Za-z0-9_-]{1,4096}$/.test(value);
+
+function agentWorkPage(ctx, auth, roomId, cursor) {
+  const codec = conversationCursorCodec(ctx.store);
+  // The inner reply cursor carries its own source proof. Bind the outer
+  // continuation to this observation, credential and current member revision.
+  // A cursor borrowed from a different endpoint or permission state is invalid.
+  const binding = createHash("sha256").update(JSON.stringify([
+    "agent-work-page-v1", roomId, auth.member.id, auth.member.revision, auth.credentialHash,
+    auth.account?.id ?? null, auth.account?.authEpoch ?? null,
+    auth.sessionBinding ?? null, auth.sessionRevision ?? null
+  ])).digest("base64url");
+  const saved = cursor === null ? null : codec.decode(cursor);
+  if (cursor !== null && (saved?.binding !== binding || !validCursor(saved?.after))) {
+    ctx.reject(409, "invalid_agent_work_cursor", "The work observation continuation is unavailable. Restart the authorized queue read.");
+  }
+  return {
+    after: saved?.after,
+    wrap: after => after ? codec.encode({ binding, after }) : null,
+  };
+}
 
 // The standing refusals requestRuns.apply checks before a claim
 // (server/request-runs.mjs), read without writing. Revision and context
@@ -28,15 +53,25 @@ export function readAgentWork(ctx) {
     ctx.rate(`read:${auth.credentialHash}`, 600);
     if (auth.kind === 'api-key' && !(auth.apiKeyScopes ?? []).some(scope => scope === 'rooms:read' || scope === 'rooms:*'))
       ctx.reject(403, 'insufficient_scope', 'API key lacks the rooms:read scope');
-    if ([...ctx.url.searchParams.keys()].some(key => key !== 'auth') || ctx.url.searchParams.getAll('auth').length > 1)
-      ctx.reject(422, 'invalid_request', 'This read does not accept filters');
+    const query = ctx.url.searchParams;
+    const paged = query.get("view") === "page";
+    const cursor = query.get("cursor");
+    if ([...query.keys()].some(key => !["auth", "view", "cursor"].includes(key) || query.getAll(key).length > 1)
+      || (query.has("view") && !paged) || (cursor !== null && (!paged || !validCursor(cursor)))) {
+      ctx.reject(422, "invalid_request", "Choose the complete work observation or one bounded work page");
+    }
     const current=isCurrentRoom(ctx.store.db,roomId);
+    if (!current && cursor !== null)
+      ctx.reject(409, "invalid_agent_work_cursor", "This Room does not have a current work observation continuation.");
+    const page = paged ? agentWorkPage(ctx, auth, roomId, cursor) : null;
     const selection = ctx.store.replyRequests.list(selected.token, roomId,
-      { direction: 'incoming', status: 'open', expectedSessionBinding: fence, ...(current?{limit:4}:{}) });
+      { direction: 'incoming', status: 'open', expectedSessionBinding: fence,
+        ...(current ? { limit: PAGE_SIZE, cursor: page?.after } : {}) });
     // This v1 combined view promises the complete open queue. Current request
     // discovery is paginated; never turn its partial/empty first window into a
     // complete work observation for existing clients.
-    if (selection.sourceWindow?.complete === false || selection.page?.hasMore === true)
+    const partial = selection.sourceWindow?.complete === false || selection.page?.hasMore === true;
+    if (!paged && partial)
       ctx.reject(422, 'reply_list_too_large', 'Use room_list_requests / reply-requests and follow nextRead to finish this queue');
     const {requests,evaluatedThrough}=selection;
     validateSelectedRunOpenings(ctx.store,roomId,requests,auth.member.id);
@@ -63,7 +98,9 @@ export function readAgentWork(ctx) {
         permissions: [...member.permissions], delegatedAdmin: member.delegatedAdmin === true },
       ownerId: state.room.ownerId, archivedAt: state.room.archivedAt ?? null,
       paused: pause ? { pausedAt: pause.pausedAt, heldBy: pause.heldBy } : null, evaluatedThrough,
-      observedAt: ctx.store.now(), requests, runs, blockedBy, executionGranted: false };
+      observedAt: ctx.store.now(), requests, runs, blockedBy, executionGranted: false,
+      ...(page ? { sourceWindow: { complete: !partial },
+        page: { cursor, nextCursor: page.wrap(selection.page?.nextCursor), hasMore: partial } } : {}) };
   });
   // Never silently omit work to fit a response. A future paginated protocol
   // must bind continuation to this principal and its authorization state.
@@ -77,5 +114,6 @@ export const AGENT_WORK_ROUTES = Object.freeze([
     parity: 'exempt:HTTP agent pickup observation; execution remains on existing request commands',
     auth: 'room', capability: null, scope: 'room', handler: readAgentWork,
     schema: { params: { type: 'object', required: ['roomId'], properties: { roomId: { type: 'string' } } },
+      query: { type: "object", properties: { view: { enum: ["page"] }, cursor: { type: "string", minLength: 1, maxLength: 4096 } } },
       response: { type: 'object' } }, events: [] })
 ]);

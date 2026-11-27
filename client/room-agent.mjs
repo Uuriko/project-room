@@ -22,6 +22,7 @@ import { edgeDoorApiPath } from "../src/service-origin.js";
 import { CONTENT_TRUST, markIfOther, stampWorkListing, withContentTrust } from "../server/content-trust.mjs";
 import { validRoomDigest } from "./room-digest.mjs";
 import { validReceiverRouteScope } from "../src/reply-requests.js";
+import { createParser } from "../third_party/eventsource-parser/parse.js";
 
 export { AGENT_ERRORS };
 export class RoomClientError extends Error {
@@ -572,44 +573,71 @@ export class RoomAgentClient {
       if (!response.headers.get("content-type")?.startsWith("text/event-stream") || !response.body)
         throw new RoomClientError(200, "invalid_response", "Room returned an invalid event stream");
       reader = response.body.getReader();
-      const decoder = new TextDecoder(); let buffer = "";
-      while (true) {
-        const chunk = await reader.read(); if (chunk.done) return idle();
-        buffer += decoder.decode(chunk.value, { stream: true });
-        if (buffer.length > 262144) throw new RoomClientError(200, "invalid_response", "Room stream frame exceeds its limit");
-        let boundary;
-        while ((boundary = /\r?\n\r?\n/.exec(buffer))) {
-          const frame = buffer.slice(0, boundary.index); buffer = buffer.slice(boundary.index + boundary[0].length);
-          const kind = /^event: ?([^\r\n]+)/m.exec(frame)?.[1];
+      const decoder = new TextDecoder();
+      const frameLimit = 262144;
+      const overflow = () => new RoomClientError(200, "invalid_response", "Room stream frame exceeds its limit");
+      let outcome, frameSize = 0, lineHasText = false, endsWithCR = false;
+      // Keep a raw-input budget for complete frames, including comments and
+      // unknown fields that the parser can consume without buffering data.
+      const checkFrameBudget = text => {
+        if (!text.length) return;
+        if (frameSize + text.length > frameLimit) throw overflow();
+        let lineStart = endsWithCR && text.startsWith("\n") ? 1 : 0;
+        let frameStart = 0;
+        for (const ending of text.matchAll(/\r\n|[\r\n]/g)) {
+          if (ending.index < lineStart) continue; // CRLF split across reads
+          if (ending.index === lineStart && !lineHasText) frameStart = ending.index + ending[0].length;
+          lineStart = ending.index + ending[0].length;
+          lineHasText = false;
+        }
+        lineHasText ||= lineStart < text.length;
+        endsWithCR = text.endsWith("\r");
+        frameSize = frameStart ? text.length - frameStart : frameSize + text.length;
+      };
+      const parser = createParser({
+        maxBufferSize: frameLimit,
+        onError(error) {
+          if (!outcome && error.type === "max-buffer-size-exceeded") throw overflow();
+        },
+        onEvent: ({ event: kind, id, data }) => {
+          if (outcome) return;
           if (kind === "access-ended") throw new RoomClientError(401, "access_ended", "Room access ended");
-          if (kind === "stream_lagging") return { changed: true };
-          if (kind !== "room-event") continue;
-          const id = /^id: ?([0-9]+)\r?$/m.exec(frame)?.[1], sequence = Number(id);
-          if (!id || !Number.isSafeInteger(sequence) || sequence <= through)
+          if (kind === "stream_lagging") { outcome = { changed: true }; return; }
+          if (kind !== "room-event") return;
+          const sequence = Number(id);
+          if (!id || !/^[0-9]+$/.test(id) || !Number.isSafeInteger(sequence) || sequence <= through)
             throw new RoomClientError(200, "invalid_response", "Room returned an invalid stream cursor");
-          if (!requestHints && reviewWorkItemId === undefined) return { changed: true, sequence };
-          const data = /^data: ?(.+)\r?$/m.exec(frame)?.[1];
+          if (!requestHints && reviewWorkItemId === undefined) { outcome = { changed: true, sequence }; return; }
           let row;
-          try { row = JSON.parse(data); } catch { return { changed: true }; }
+          try { row = JSON.parse(data); } catch { outcome = { changed: true }; return; }
           const event = row?.event, message = event?.data;
           if (row?.sequence !== sequence || event?.roomId !== this.#roomId || !validId(event.id)
-            || !validId(event.actorId) || typeof event.type !== "string") return { changed: true };
+            || !validId(event.actorId) || typeof event.type !== "string") { outcome = { changed: true }; return; }
           through = sequence;
           if (reviewWorkItemId !== undefined) {
-            if (message?.workItemId !== reviewWorkItemId || !["work.completed", "verification.recorded", "work.superseded"].includes(event.type)) continue;
-            return { changed: true, sequence, reviewHint: {
+            if (message?.workItemId !== reviewWorkItemId || !["work.completed", "verification.recorded", "work.superseded"].includes(event.type)) return;
+            outcome = { changed: true, sequence, reviewHint: {
               eventId: event.id, recordedAt: event.at, observedAt: new Date().toISOString()
             } };
+            return;
           }
-          if (event.type !== "message.posted" || message?.requestKind !== "reply") continue;
+          if (event.type !== "message.posted" || message?.requestKind !== "reply") return;
           if (!validId(message.toMemberId) || !validId(message.messageId)
-            || message.workItemId != null && !validId(message.workItemId)) return { changed: true };
-          if (message.toMemberId !== this.#memberId || event.actorId === this.#memberId) continue;
-          return { changed: true, sequence, requestHint: { id: message.messageId, openingEventId: event.id,
+            || message.workItemId != null && !validId(message.workItemId)) { outcome = { changed: true }; return; }
+          if (message.toMemberId !== this.#memberId || event.actorId === this.#memberId) return;
+          outcome = { changed: true, sequence, requestHint: { id: message.messageId, openingEventId: event.id,
             requesterId: event.actorId, recipientId: message.toMemberId, workItemId: message.workItemId ?? null,
             observedAt: new Date().toISOString() } };
-        }
+        },
+      });
+      while (!outcome) {
+        const chunk = await reader.read();
+        if (chunk.done) return idle(); // Do not dispatch an unfinished event at EOF.
+        const text = decoder.decode(chunk.value, { stream: true });
+        checkFrameBudget(text);
+        parser.feed(text);
       }
+      return outcome;
     } catch (error) {
       if (deadline.aborted && !signal?.aborted) return idle();
       throw error;
@@ -728,14 +756,18 @@ export class RoomAgentClient {
   }
   // This response authenticates its own principal; a separate snapshot
   // preflight would duplicate the read. It is never an execution grant.
-  async agentWork({ signal } = {}) {
+  async agentWork({ signal, paged = false, cursor } = {}) {
     if (!this.#memberId) throw new RoomClientError(0, "member_required", "Configure the expected agent member before reading work");
+    const validCursor = value => typeof value === "string" && /^[A-Za-z0-9_-]{1,4096}$/.test(value);
+    if (typeof paged !== "boolean" || (cursor !== undefined && (!paged || !validCursor(cursor))))
+      throw new Error("Choose a bounded work observation continuation");
+    const query = paged ? "?" + new URLSearchParams({ view: "page", ...(cursor === undefined ? {} : { cursor }) }) : "";
     let value;
-    try { value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}/agent-work`, undefined, signal); }
+    try { value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}/agent-work${query}`, undefined, signal); }
     catch (error) {
       // Older deployments alone use the existing authorized path. Never hide
       // authentication failures, throttling, malformed data or service errors.
-      if (error.status !== 404 || error.code !== "not_found") throw error;
+      if (paged || error.status !== 404 || error.code !== "not_found") throw error;
       const listing = await this.replyRequests({ direction: "incoming", status: "open", signal });
       const { runs } = listing.requests.length ? await this.requestRuns(undefined, { signal }) : { runs: {} };
       return { ...listing, runs };
@@ -751,6 +783,13 @@ export class RoomAgentClient {
       || !validId(value.ownerId) || value.executionGranted !== false || !integer(value.evaluatedThrough)
       || !integer(value.observedAt) || !Array.isArray(value.requests) || !value.runs || typeof value.runs !== "object" || Array.isArray(value.runs))
       throw new RoomClientError(200, "invalid_response", "Invalid work observation for the configured agent");
+    if (paged) {
+      const page = value.page;
+      if (!page || page.cursor !== (cursor ?? null) || typeof page.hasMore !== "boolean"
+        || value.sourceWindow?.complete !== !page.hasMore || !Object.hasOwn(value, "blockedBy")
+        || (page.hasMore ? !validCursor(page.nextCursor) || page.nextCursor === cursor : page.nextCursor !== null))
+        throw new RoomClientError(200, "invalid_response", "Invalid work observation continuation for the configured agent");
+    }
     const ids = new Set();
     for (const request of value.requests) {
       if (!request || !validId(request.id) || ids.has(request.id) || request.recipientId !== this.#memberId

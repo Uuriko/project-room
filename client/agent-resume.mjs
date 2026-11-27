@@ -200,6 +200,10 @@ export async function resumeAgent({ connection, fetchImpl = fetch, sinceVersion,
         httpStatus: error instanceof RoomClientError ? error.status : 0 };
       incomplete('openRequests', error);
       incomplete('pendingReconciliations', error);
+      if (error instanceof RoomClientError && error.status === 422 && error.code === 'reply_list_too_large') {
+        out.nextReads.push({ source: 'openRequests', tool: 'room_list_requests',
+          arguments: { roomId: connection.roomId, direction: 'incoming', status: 'open' } });
+      }
     }
   }
   // Fresh compact read, not a cached grant. Changed context replaces the earlier projection.

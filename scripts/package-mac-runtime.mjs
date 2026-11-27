@@ -31,6 +31,13 @@ export function packageMacRuntime(source, destination) {
     walk(ast);
   }
   for (const entry of entries) visit(join(root, entry));
+  const parserDirectory = "third_party/eventsource-parser";
+  if (files.has(`${parserDirectory}/parse.js`)) {
+    for (const filename of ["LICENSE", "NOTICE", "parse.js.map", "errors.js.map"]) {
+      const path = `${parserDirectory}/${filename}`;
+      files.set(path, readFileSync(join(root, path)));
+    }
+  }
   files.set("package.json", Buffer.from(JSON.stringify({ private: true, type: "module" }) + "\n"));
   const manifest = { version: 1, entries, files: [...files].sort(([a], [b]) => a.localeCompare(b)).map(([path, data]) => ({ path, bytes: data.length, sha256: createHash("sha256").update(data).digest("hex") })) };
   mkdirSync(output, { recursive: true });
