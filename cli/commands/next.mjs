@@ -3,7 +3,7 @@ import { loadConnection } from "../paths.mjs";
 import { boundedJson } from "../room-response.mjs";
 import { validId } from "../../src/events.js";
 
-const HELP = "room next [--source work|requests] [--cursor TOKEN] [--considered-discovery TOKEN]\nRead addressed work and incoming formal requests for the saved Room. Outputs JSON. Follow nextRead even when a pickup page is empty.";
+const HELP = "room next [--source work|requests] [--cursor TOKEN] [--considered-discovery TOKEN]\nRead addressed work and incoming formal requests for the saved Room. Outputs JSON. Follow nextRead even when a pickup page is empty. Check the remaining rows and both source continuations before treating pickup as clear.";
 
 function selectionOf(argv) {
   const args = {};

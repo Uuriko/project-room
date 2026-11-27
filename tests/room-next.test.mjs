@@ -322,6 +322,91 @@ test("an empty work page advances, keeps ongoing work, and invalidates stale aut
   assert.equal(invalid.ok, false);
 });
 
+test("pickup resumes Work after history-filtered requests and fences changed access", async t => {
+  const f = await privateWorkFixture(t, "normalized-current-v1", { historyVisibility: "since_join" });
+  const follow = pointer => f.mcp(f.triage, pointer.tool, pointer.arguments);
+  const start = () => f.mcp(f.triage, "room_next", { view: "pickup" });
+  const beforeActivation = "old-request-before-return-";
+  f.store.dmConsents.request("commons", "owner", f.triage.id, "fixture");
+  f.store.dmConsents.decide("commons", f.triage.id, "owner", "approve");
+  for (let i = 0; i < 8; i++) f.send(f.owner, "message.posted", {
+    messageId: beforeActivation + i, toMemberId: f.triage.id, requestKind: "reply", body: "Earlier obligation"
+  });
+  let memberRevision = f.store.authenticate(f.triage.secret, "commons").member.revision;
+  const access = (active, permissions) => {
+    f.send(f.owner, "member.access_changed", {
+      memberId: f.triage.id, expectedMemberRevision: memberRevision, permissions, active
+    });
+    memberRevision++;
+  };
+  access(false, ["accept_work"]);
+  access(true, ["accept_work"]);
+  const owned = "z-current-install-review";
+  const propose = workItemId => f.send(f.owner, "work.proposed", { workItemId, title: "Review installation",
+    definitionOfDone: "Verify the installation notes", accountableMemberId: f.triage.id, mode: "read" });
+  const close = workItemId => f.send(f.owner, "work.superseded", { workItemId, expectedRevision: f.rev(workItemId),
+    supersededByWorkItemId: "open", reason: "Covered by the replacement." });
+  for (let i = 0; i < 16; i++) {
+    const id = "a-settled-install-" + String(i).padStart(2, "0");
+    propose(id);
+    close(id);
+  }
+  propose(owned);
+  // Use the supported fallback without the optional indexed action filter.
+  Object.defineProperty(f.store.db, "function", { value: undefined, configurable: true });
+  t.after(() => delete f.store.db.function);
+
+  const withoutOffer = value => {
+    assert.equal(value.ifIdle?.status === "invitation", false);
+    assert.equal(value.ifIdle?.investigation, undefined);
+    assert.equal(value.ifIdle?.discoveryReview, undefined);
+  };
+  const drainRequests = async () => {
+    const first = await start();
+    assert.ok(first.ok, first.text);
+    for (const source of ["work", "requests"]) {
+      assert.equal(first.value[source].coverage, "partial");
+      assert.deepEqual(first.value[source].items, []);
+    }
+    assert.equal(first.value.nextRead.arguments.source, "requests");
+    withoutOffer(first.value);
+    const last = await follow(first.value.nextRead);
+    assert.ok(last.ok, last.text);
+    assert.equal(last.value.requests.coverage, "complete");
+    assert.deepEqual(last.value.requests.items, []);
+    assert.doesNotMatch(last.text, /Earlier obligation|old-request-before-return-/);
+    assert.equal(last.value.nextRead.arguments.source, "work");
+    withoutOffer(last.value);
+    return { first: first.value, work: last.value.nextRead };
+  };
+
+  const scan = await drainRequests();
+  const addressed = await follow(scan.work);
+  assert.equal(addressed.value.nextRead.arguments.workItemId, owned);
+  assert.equal(addressed.value.work.coverage, "complete");
+  withoutOffer(addressed.value);
+
+  access(true, ["accept_work", "verify"]);
+  const stale = await follow(scan.first.nextRead);
+  assert.equal(stale.value.requests.reason, "cursor_changed");
+  assert.deepEqual(stale.value.nextRead, { tool: "room_next", arguments: { roomId: "commons", view: "pickup" } });
+  withoutOffer(stale.value);
+  assert.equal((await follow(stale.value.nextRead)).value.requests.coverage, "partial");
+
+  close(owned);
+  const dry = await drainRequests();
+  const completed = await follow(dry.work);
+  assert.equal(completed.value.work.coverage, "complete");
+  assert.deepEqual(completed.value.work.items, []);
+  assert.ok(completed.value.ifIdle?.investigation);
+
+  access(false, ["accept_work", "verify"]);
+  const revoked = await follow(dry.work);
+  assert.equal(revoked.ok, false, revoked.text);
+  assert.equal(revoked.value?.ifIdle, undefined);
+  assert.equal((await start()).ok, false);
+});
+
 test("composite OAuth scope admits only the combined read grant", () => {
   const scopes = ["rooms:read", "work:read", "chat:read"];
   assert.equal(mcpOAuthToolAllowed("room_next", scopes), true);

@@ -8,6 +8,7 @@ import { readWorkItem } from "../../server/work-repository.mjs";
 import { textVersion } from "../../server/text-results.mjs";
 import { setTier } from "../../server/autonomy-tiers.mjs";
 import { linkWithProof } from "./link-with-proof.mjs";
+import { event } from "../../src/events.js";
 
 export const PRIVATE = Object.fromEntries(["TITLE", "DONE", "REQUEST", "REPO", "REF", "PATH", "BLOCKER", "UNBLOCK", "RESOLUTION", "HANDOFF", "HANDOFFNEXT", "LIMIT",
   "HANDOFFURL", "HANDOFFVERSION",
@@ -16,10 +17,14 @@ export const PRIVATE = Object.fromEntries(["TITLE", "DONE", "REQUEST", "REPO", "
 export const PUBLIC = { TITLE: "zq-public-title-zq", REPO: "zq-public-repo-zq", RESULT: "zq-public-result-body-zq", OLDRESULT: "zq-public-old-result-body-zq" };
 export const privateMarkers = text => [...new Set(text.match(/zq-private-[a-z]+-zq/g) ?? [])].sort();
 
-export async function privateWorkFixture(t, representation, { ownerDecisionRequired = false } = {}) {
+export async function privateWorkFixture(t, representation, { ownerDecisionRequired = false, historyVisibility } = {}) {
   const quiet = console.log; console.log = () => {};
   const store = new RoomStore(":memory:");
-  store.initialize(initialRoom(), representation === "legacy" ? {} : { representation });
+  const initial = initialRoom();
+  if (historyVisibility) initial.push(event({
+    roomId: "commons", actorId: "owner", type: "room.history_visibility_set", data: { historyVisibility }
+  }));
+  store.initialize(initial, representation === "legacy" ? {} : { representation });
   console.log = quiet;
   const owner = store.issueAccessKey("commons", "owner");
   const member = (name, permissions) => {
