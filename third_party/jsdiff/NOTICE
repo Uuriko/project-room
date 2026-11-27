@@ -1,0 +1,3 @@
+jsdiff (npm package diff), version 9.0.0, BSD-3-Clause.
+Source: https://github.com/kpdecker/jsdiff/tree/db0b12ace208da7fd741cf96d97f009347a9eaa8
+src/vendor-jsdiff-patch.js is the unchanged structuredPatch implementation and reachable dependencies bundled from the published ES modules. Reproduce by unpacking npm pack diff@9.0.0 into package/, exporting structuredPatch from ./package/libesm/patch/create.js in entry.js, and running esbuild@0.25.12 entry.js --bundle --format=esm. Remove the two upstream TypeScript-only lint directive comments. Prefix the output with the upstream LICENSE as line comments.

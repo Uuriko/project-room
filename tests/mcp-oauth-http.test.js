@@ -920,6 +920,10 @@ test('OAuth exact result shows a correction without advertising an ungranted res
   const complete = await call('room_read_result');
   assert.equal(complete.workThread.pendingCorrection.action.tool, 'room_resolve_blocker');
 
+  command('source-reply', 'message.posted', { messageId: 'source-reply', replyToId: 'correct-evidence', body: 'Use the signed commit.' });
+  const replies = await call(complete.discussionRead.tool, complete.discussionRead.arguments);
+  assert.equal(replies.discussion.replies[0].body, 'Use the signed commit.');
+
   const readonly = await f.consent({ scope: 'rooms:read work:read' });
   const code = new URL(readonly.headers.get('location')).searchParams.get('code');
   const response = await f.exchange({ grant_type: 'authorization_code', code, client_id: CLIENT.clientId,
@@ -928,6 +932,10 @@ test('OAuth exact result shows a correction without advertising an ungranted res
   const narrowed = await call('room_read_result', {}, tokens.access_token);
   assert.equal(narrowed.workThread.pendingCorrection.verificationEventId, complete.workThread.pendingCorrection.verificationEventId);
   assert.equal(narrowed.workThread.pendingCorrection.action, undefined);
+  assert.equal(narrowed.discussionRead, undefined);
+  const denied = await f.rpc('tools/call', { name: complete.discussionRead.tool, arguments: complete.discussionRead.arguments }, tokens.access_token);
+  assert.match(JSON.stringify(denied.body), /outside the connected agent grant/);
+  assert.equal(JSON.stringify(denied.body).includes('Use the signed commit.'), false);
 });
 
 test('native reviewer follows Room Next to private project findings on the same OAuth grant', async t => {

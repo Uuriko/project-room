@@ -8,6 +8,10 @@
           in: query
           required: true
           schema: { type: string }
+        - name: completionEventId
+          in: query
+          description: Read visible replies to this completion’s source message. Use only with workItemId. Returns discussion.messageId and discussion.replies. Receipts citing the same message share its replies.
+          schema: { type: string }
         - name: cursor
           in: query
           schema: { type: string }
@@ -30,4 +34,5 @@
         '200': { description: "{ contractVersion, roomId, workItemId, viewer*, selection, discussion, current, scope }" }
         '404': { description: work_not_found }
         '409': { description: discussion_reset_required in consistent mode; discard retained discussion and restart without a token. Legacy reads may return discussion_ahead or discussion_history_changed. }
+        '413': { description: Exact source discussion exceeds the permitted response size. }
         '422': { description: invalid_discussion }

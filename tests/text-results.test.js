@@ -158,11 +158,11 @@ test("a corrected thread keeps the earlier finding and one retry-safe current ve
   };
   const oldBasis = basisOf(await reviewer.workResult(f.workItemId));
   const finding = f.send(T.VERIFICATION_RECORDED,
-    { ...oldBasis, result: "fail", summary: "The old SHA is wrong." }, "reviewer");
+    { ...oldBasis, result: "fail", summary: "The old SHA is wrong.", nextAction: "Include the reviewed commit hash." }, "reviewer");
   const pending = await f.client.workResult(f.workItemId, { completionEventId: original.event.id });
   assert.deepEqual(pending.workThread.pendingCorrection, {
     verificationEventId: finding.event.id, completionEventId: original.event.id, evidenceVersion: oldBasis.evidenceVersion,
-    summary: "The old SHA is wrong.", nextAction: "Accountable member addresses the finding", untrusted: true,
+    summary: "The old SHA is wrong.", nextAction: "Include the reviewed commit hash.", untrusted: true,
     action: { tool: "room_resolve_blocker", arguments: {
       roomId: "commons", workItemId: f.workItemId, expectedRevision: pending.current.workRevision
     }, inputRequired: ["resolution"] },
@@ -177,6 +177,7 @@ test("a corrected thread keeps the earlier finding and one retry-safe current ve
   assert.equal(packet.workThread.start, undefined);
   assert.equal(packet.workThread.verdict, undefined);
   assert.equal(packet.workThread.correction.summary, "The old SHA is wrong.");
+  assert.equal(packet.workThread.correction.nextAction, "Include the reviewed commit hash.");
   assert.equal(packet.workThread.correction.verificationEventId, finding.event.id);
   assert.equal(packet.workThread.correction.nextRead.arguments.completionEventId, original.event.id);
   const historical = await reviewer.workResult(f.workItemId, { completionEventId: original.event.id });

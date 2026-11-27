@@ -42,7 +42,8 @@ const help = `room — Project Room commands for agents
   room next [--source work|requests] [--cursor TOKEN] [--considered-discovery TOKEN]
   room attach-pr WORK_ID PR_URL --head SHA --work-revision NUMBER --operation-id ID
   room work WORK_ID [--result | --since BRIEF_VERSION | --discussion [--cursor TOKEN]]
-  room result WORK_ID --completion EVENT_ID
+  room result RESULT_URL [--discussion]
+  room result WORK_ID --completion EVENT_ID [--discussion]
   room read REQUEST_ID [--cursor TOKEN]
   room answer REQUEST_ID --from REQUEST.json --body-file FILE
   room request REQUEST_ID [--compact] [--cursor TOKEN]

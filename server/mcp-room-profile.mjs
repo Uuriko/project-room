@@ -1373,6 +1373,12 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
             value.answerFilesRead.nextRead = { tool, arguments: answerFileSelection(value) };
           }
         }
+        if (name === "room_read_result" && value.discussionRead?.tool) {
+          const tool = value.discussionRead.tool;
+          const definition = HOSTED_TOOLS.find(entry => entry.name === tool);
+          if (!definition || (oauthPrincipal && !mcpOAuthToolAllowed(tool, oauthPrincipal.scopes))
+              || catalogCallDenial(resolveCatalogAgent(store, identity), definition)) delete value.discussionRead;
+        }
         if (name === "room_read_result" && !outcome.isError && oauthPrincipal && value.workThread?.pendingCorrection?.action) {
           const { tool } = value.workThread.pendingCorrection.action;
           const definition = HOSTED_TOOLS.find(entry => entry.name === tool);

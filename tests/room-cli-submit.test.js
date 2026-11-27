@@ -4,9 +4,11 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
+import { exactResultHref } from "../src/record-link.js";
 import { main } from "../cli/main.mjs";
 import { connectionHome, connectionsRoot, writePointer, writeProject } from "../cli/paths.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
+import { textVersion } from "../server/text-results.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
@@ -73,10 +75,143 @@ async function fixture(t, representation) {
     assert.equal(lines.length, 1);
     return { code, value: lines[0] };
   };
-  return { home, env, store, owner, producer, reviewer, reviewerProject, rpc, save, cli };
+  return { home, env, origin, store, owner, producer, reviewer, reviewerProject, rpc, save, cli };
 }
 
 for (const representation of ["legacy", "normalized-current-v1"]) {
+test(`${representation} a colleague reads an exact shared result URL with their own project connection`, async t => {
+  const { origin, store, owner, producer, reviewer, reviewerProject, cli, rpc } = await fixture(t, representation);
+  const workItemId = "handoff";
+  store.command(owner, "commons", { id: "request", type: "work.proposed", data: { workItemId,
+    title: "Draft the brief", definitionOfDone: "Share the brief", accountableMemberId: producer.identityId, verifierMemberId: reviewer.identityId, independentVerificationRequired: true, mode: "read" } });
+  const selected = (await cli(["work", workItemId])).value;
+  assert.equal((await cli(["begin", "--from", "-"], selected)).code, 0);
+  const work = (await cli(["work", workItemId])).value;
+  const submitted = await cli(["submit", workItemId, "--operation", "handoff-result"], {
+    body: "Draft from a colleague.", expectedRevision: work.revision, producerId: producer.identityId,
+    summary: "Drafted the brief", nextAction: "Review the draft" });
+  assert.equal(submitted.code, 0, JSON.stringify(submitted));
+  const { completionEventId } = submitted.value.next.arguments;
+  const sharedUrl = exactResultHref({ roomId: "commons", workItemId,
+    completionEventId }, new URL(origin));
+  const shared = await cli(["result", sharedUrl], undefined, reviewerProject);
+  assert.equal(shared.code, 0);
+  assert.equal(shared.value.result.text.body, "Draft from a colleague.");
+  assert.equal(shared.value.result.receipt.eventId, completionEventId);
+  assert.equal(shared.value.discussion, undefined);
+  assert.equal(shared.value.discussionRead.path, `/api/rooms/commons/messages/${shared.value.result.text.messageId}/thread`);
+  const quoted = "> Draft from a colleague.\n\nPlease name Maya as the owner.";
+  const feedback = store.command(reviewer.secret, "commons", { id: "feedback", type: "message.posted",
+    data: { messageId: "quoted-feedback", replyToId: shared.value.result.text.messageId, body: quoted } });
+  store.command(reviewer.secret, "commons", { id: "private-feedback", type: "message.posted",
+    data: { messageId: "private-feedback", replyToId: shared.value.result.text.messageId, body: "Private aside", toMemberId: "owner" } });
+  const exact = await rpc("room_read_result", { workItemId, completionEventId });
+  const connectorRead = await rpc(exact.discussionRead.tool, exact.discussionRead.arguments);
+  assert.equal(connectorRead.completionEventId, completionEventId);
+  assert.equal(connectorRead.discussion.messageId, shared.value.result.text.messageId);
+  assert.deepEqual(connectorRead.discussion.replies.map(reply => reply.body), [quoted]);
+  assert.equal(connectorRead.discussion.replies[0].untrusted, true);
+  const producerRead = await cli(shared.value.discussionRead.command.slice(1));
+  assert.equal(producerRead.code, 0, JSON.stringify(producerRead));
+  assert.equal(producerRead.value.discussion.replies[0].id, feedback.event.data.messageId);
+  assert.equal(producerRead.value.discussion.replies[0].body, quoted);
+  assert.equal(producerRead.value.discussion.replies[0].untrusted, true);
+  assert.equal(producerRead.value.discussion.replies.length, 1);
+  assert.deepEqual(producerRead.value.current.next, shared.value.current.next);
+  assert.equal(producerRead.value.result.receipt.eventId, completionEventId);
+  assert.equal(producerRead.value.current.workRevision, shared.value.current.workRevision);
+  for (const [threadResponse, code] of [
+    [() => new Response(null, { status: 413 }), "result_discussion_too_large"],
+    [() => Response.json({ roomId: "commons", thread: { id: shared.value.result.text.messageId, workItemId,
+      authorId: producer.identityId, body: null, deletedAt: Date.now(), replies: [] } }), "result_discussion_unavailable"]
+  ]) {
+    const partial = await cli(["result", sharedUrl, "--discussion"], undefined, reviewerProject, (url, options) =>
+      options.method === "POST" ? fetch(url, options) : threadResponse());
+    assert.equal(partial.code, 1);
+    assert.equal(partial.value.code, code);
+    assert.equal(partial.value.result, undefined);
+  }
+  const review = await cli(["work", workItemId, "--result"], undefined, reviewerProject);
+  assert.equal((await cli(["review", "--from", "-", "--fail", "--summary", "Name the owner."],
+    review.value, reviewerProject)).code, 0);
+  const blocked = await cli(["work", workItemId]);
+  assert.equal((await cli(["resolve", "--from", "-", "--resolution", "Added the owner."], blocked.value)).code, 0);
+  const resumed = await cli(["work", workItemId]);
+  assert.equal((await cli(["begin", "--from", "-"], resumed.value)).code, 0);
+  const working = await cli(["work", workItemId]);
+  const revised = await cli(["submit", workItemId, "--operation", "revised-handoff"], {
+    body: "Owner: Maya.", expectedRevision: working.value.revision, producerId: producer.identityId,
+    summary: "Named the owner", nextAction: "Check the revised brief" });
+  assert.equal(revised.code, 0);
+  const revisedUrl = exactResultHref({ roomId: "commons", workItemId,
+    completionEventId: revised.value.next.arguments.completionEventId }, new URL(origin));
+  const current = await cli(["result", revisedUrl], undefined, reviewerProject);
+  assert.equal(current.value.result.text.body, "Owner: Maya.");
+  assert.equal(current.value.workThread.correction.summary, "Name the owner.");
+  const revisedDiscussion = await cli(["result", revisedUrl, "--discussion"]);
+  assert.deepEqual(revisedDiscussion.value.discussion.replies, []);
+  const earlier = await cli(["result", sharedUrl, "--discussion"], undefined, reviewerProject);
+  assert.equal(earlier.value.discussion.replies[0].body, quoted);
+  assert.equal(earlier.value.selection.status, "historical");
+  assert.equal(earlier.value.result.text.body, "Draft from a colleague.");
+  // A producer may deliberately cite the very same message in a later receipt.
+  const laterReview = await cli(["work", workItemId, "--result"], undefined, reviewerProject);
+  assert.equal((await cli(["review", "--from", "-", "--fail", "--summary", "Use the original wording."],
+    laterReview.value, reviewerProject)).code, 0);
+  assert.equal((await cli(["resolve", "--from", "-", "--resolution", "Reusing the original wording."],
+    (await cli(["work", workItemId])).value)).code, 0);
+  assert.equal((await cli(["begin", "--from", "-"], (await cli(["work", workItemId])).value)).code, 0);
+  const source = shared.value.result.text;
+  const reused = store.command(producer.secret, "commons", { id: "cite-original", type: "work.completed", data: {
+    workItemId, expectedRevision: (await cli(["work", workItemId])).value.revision, evidenceKind: "room_text",
+    evidenceMessageId: source.messageId, evidenceMessageEventId: source.messageEventId, evidenceVersion: source.evidenceVersion,
+    previousCompletionEventId: revised.value.next.arguments.completionEventId, producerId: producer.identityId,
+    summary: "Restored wording", nextAction: "Review the original wording" } });
+  const reusedRead = await cli(["result", workItemId, "--completion", reused.event.id, "--discussion"]);
+  assert.equal(reusedRead.code, 0);
+  assert.deepEqual(reusedRead.value.discussion, producerRead.value.discussion);
+  for (const other of [sharedUrl.replace("room=commons", "room=other"), sharedUrl.replace(origin, "https://other.example")]) {
+    let calls = 0;
+    const refused = await cli(["result", other], undefined, reviewerProject, () => { calls++; throw new Error("unexpected call"); });
+    assert.equal(refused.value.code, "room_selection_mismatch");
+    assert.equal(calls, 0);
+  }
+});
+
+test(`${representation} unavailable shared result gives the reviewer a safe next step`, async t => {
+  const { origin, store, owner, producer, reviewer, reviewerProject, cli } = await fixture(t, representation);
+  const workItemId = "refused-result", body = "Private reviewer fixture text";
+  store.command(owner, "commons", { id: "propose", type: "work.proposed", data: { workItemId,
+    title: "Draft a brief", definitionOfDone: "Review the draft", accountableMemberId: producer.identityId,
+    verifierMemberId: reviewer.identityId, independentVerificationRequired: true, mode: "read" } });
+  const selected = await cli(["work", workItemId]);
+  assert.equal((await cli(["begin", "--from", "-"], selected.value)).code, 0);
+  const work = await cli(["work", workItemId]);
+  const messageId = "private-result-message";
+  const posted = store.command(producer.secret, "commons", { id: "post-private", type: "message.posted",
+    data: { messageId, workItemId, toMemberId: "owner", body } });
+  const receipt = store.command(producer.secret, "commons", { id: "complete-private", type: "work.completed",
+    data: { workItemId, expectedRevision: work.value.revision, evidenceKind: "room_text", evidenceMessageId: messageId,
+      evidenceMessageEventId: posted.event.id, evidenceVersion: textVersion(body), previousCompletionEventId: null,
+      producerId: producer.identityId, summary: "Drafted", nextAction: "Review" } });
+  for (const [completionEventId, code] of [[receipt.event.id, "result_unavailable"], ["missing-completion", "result_not_found"]]) {
+    const url = exactResultHref({ roomId: "commons", workItemId, completionEventId }, new URL(origin));
+    const envelopes = [];
+    const refused = await cli(["result", url], undefined, reviewerProject, async (...args) => {
+      const response = await fetch(...args);
+      envelopes.push((await response.clone().json()).result.structuredContent);
+      return response;
+    });
+    assert.equal(refused.code, 1);
+    assert.equal(refused.value.code, code);
+    assert.match(refused.value.hint, /ask the sender/i);
+    assert.equal(JSON.stringify(refused.value).includes(body), false);
+    assert.equal(envelopes.length, 1);
+    assert.equal(envelopes[0].reason, code);
+    assert.equal(envelopes[0].hint, refused.value.hint);
+  }
+});
+
 test(`${representation} commands cover pickup, correction, review, requests and submission recovery`, async t => {
   const { home, env, store, owner, producer, reviewer, reviewerProject, rpc, save, cli } = await fixture(t, representation);
   const prepare = async (workItemId, review = false) => {

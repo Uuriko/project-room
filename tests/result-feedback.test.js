@@ -7,7 +7,7 @@ function fixture() {
   const state = { room: {}, channels: { design: {} }, messages: [message] };
   const calls = [];
   let draft, blocked = false;
-  const conversation = { rootById: new Map([["result", "thread"]]), threads: new Map([["thread", {}]]) };
+  const conversation = { byId: new Map([[message.id, message]]), rootById: new Map([["result", "thread"]]), threads: new Map([["thread", {}]]) };
   const reply = createResultFeedback({ getState: () => state, getConversation: () => conversation,
     isBlocked: () => blocked, getDraft: () => draft, onBlocked: () => calls.push("blocked"),
     openThread: (message, destination) => calls.push(["open", message.id, destination]),
@@ -35,7 +35,7 @@ test("a public draft is preserved while routing feedback", () => {
 test("withdrawn, private, archived and unknown results never navigate", () => {
   for (const change of [f => { f.message.deletedAt = 1; }, f => { f.message.toMemberId = "private"; },
     f => { f.state.room.archivedAt = "2026-10-19T00:00:00Z"; }, f => { f.state.channels.design.archivedAt = 1; },
-    f => { f.state.messages = []; }, f => f.conversation.threads.clear(), f => f.block()]) {
+    f => { f.conversation.byId.clear(); }, f => f.conversation.threads.clear(), f => f.block()]) {
     const f = fixture(); change(f); assert.equal(f.reply("result"), false); assert.deepEqual(f.calls, []);
   }
 });

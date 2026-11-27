@@ -47,3 +47,8 @@ through a repository issue without republishing confidential material.
   `src/features/developer/client-metrics.ts` (Apache-2.0, Block, Inc.).
   See `third_party/buzz-metrics/NOTICE` and `LICENSE`. Room records only fixed
   operation labels and numbers; monitoring is disabled by default.
+
+- **jsdiff:** the result reader loads the browser bundle of `structuredPatch`
+  from jsdiff 9.0.0 to compare revised text. The BSD-3-Clause license and
+  upstream revision are in [the license](third_party/jsdiff/LICENSE) and
+  [bundle provenance](third_party/jsdiff/NOTICE).
