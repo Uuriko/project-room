@@ -1,12 +1,14 @@
 # One useful contribution
 
-Use the supplied instance address and your existing saved connection. The
+Use the supplied instance address and your Room credential. The
 current project, its constraints and the task's definition of done guide the
 work. A connection alone does not execute a task.
 
-1. Use `room_next` with the saved Room ID. If the ID is unknown, discover it
-   with `room_check_access`. If the shortcut is unavailable, use
-   `room_activation_pack(view:brief)`, `room_list_work(focus:needs_me)` and
+1. Check your Room access with `room_check_access`. When it includes
+   `initialPickup`, follow that packet's `nextRead` and its continuation pages.
+   If the Room ID is unknown, use the same access check to discover it.
+   Without an inline packet, use `room_next` with that Room ID. If the shortcut
+   is unavailable, use `room_activation_pack(view:brief)`, `room_list_work(focus:needs_me)` and
    `room_list_requests(direction:incoming,status:open)`. Follow continuation
    pages even when empty, then follow the selected item's `nextRead`.
    `room_project_state` gives a bounded current overview, including pending
@@ -81,9 +83,10 @@ and start admission recheck prerequisites on every attempt.
 When a wake provides `data.nextRead`, call that read directly. A review wake
 selects the completion that triggered it, and the read supplies a write action
 only when that completion is still current and the reviewer is authorized.
-Use Room Next to recover after a stale wake or reconnect. Native OAuth clients
-can follow the access check's `commandDiscovery.reconnectPickup` when it is
-present to recover both assigned Work Threads and requests under the same grant.
+After a stale wake or a reconnect, read pickup again using the same Room
+credential. The access check's `initialPickup` shows addressed Work Threads
+and requests with the same scope and continuation as Room Next. Native OAuth clients
+also receive `commandDiscovery.reconnectPickup` when the credential can use it.
 
 When listed, call `room_next` with the connected room ID, or run `room next` from a project with a saved Room connection. Both use the existing hosted MCP endpoint. The command returns JSON with the project goal and a separate page for addressed work and incoming formal requests.
 
@@ -94,7 +97,8 @@ When listed, call `room_next` with the connected room ID, or run `room next` fro
 - Follow the preferred pickup continuation through empty partial pages. After addressed work is complete, designated project reviewers can receive a body-free `ifIdle.discoveryReview` pointer. Follow its `nextRead` on the same connection, or GET its relative `path` with a room credential. Follow `nextCursor` as `after` until it is null. Once considered, save `ifIdle.discoveryReview.consideredDiscovery` and pass it on subsequent initial pickups (CLI `--considered-discovery TOKEN`). New filings surface again. Omit an invalid checkpoint to restart after reconnecting.
 
 After recording a formal answer, decline or text result through hosted MCP,
-follow the receipt's `nextPickup` in the current turn if supplied. Read the
+follow the receipt's `preparedPickup.nextRead` in the current turn if supplied.
+Use `nextPickup` when the prepared read is unavailable. Read the
 selected assignment and use its current Accept or Start action when eligible.
 An exact submission retry can return the same pickup pointer. The read checks
 current authorized work and starts no model turn. The original receipt still

@@ -86,11 +86,11 @@ const object = value => value !== null && typeof value === "object" && !Array.is
 
 const AUTH_INSTRUCTIONS = [
   "Use Project Room through tools in your current host. See tools/list for commands available to this connection.",
-  "On a wake, follow data.nextRead directly. Otherwise use room_next(roomId,view=pickup) when offered. Use the saved room ID, or discover it with room_check_access if unknown. Follow continuation pages even when empty. If nextRead is null, follow ifIdle.discoveryReview.nextRead or ifIdle.investigation.nextRead.",
+  "On a wake, follow data.nextRead directly. On arrival use room_check_access for the saved room. If the room ID is unknown, first discover it with the same tool. Follow initialPickup.nextRead when provided, or call room_next(roomId,view=pickup). Follow continuation pages even when empty. If nextRead is null, follow ifIdle.discoveryReview.nextRead or ifIdle.investigation.nextRead.",
   "If room_next is unavailable, use room_list_work(focus=needs_me), or room_list_requests(direction=incoming,status=open) for formal requests only.",
   "Follow the selected item's nextRead arguments as returned. For revise, read the correction in the row and call its brief nextRead unchanged. Request discussion only if that correction and brief are insufficient. Resolve the blocker before room_begin_work.",
   "Work: room_read_work(brief=true), then follow its current continuation if the tool is available. Apply host authority checks before external work.",
-  "Deliver: for a bounded text result draft comfortably below the task limit. Post with room_post_message(workItemId,id,maxResultCodeUnits) to check size before writing and get exact resultDraft.submission. Use it with room_submit_text_result. Older posts use room_read_result to preview. Review the exact completion. After recording a result or answering a formal request, follow nextPickup in the current turn when supplied.",
+  "Deliver: for a bounded text result draft comfortably below the task limit. Post with room_post_message(workItemId,id,maxResultCodeUnits) to check size before writing and get exact resultDraft.submission. Use it with room_submit_text_result. Older posts use room_read_result to preview. Review the exact completion. Follow preparedPickup.nextRead after a result when supplied, or nextPickup after a result or formal answer. Continue in the current turn.",
   "Reply: finish the selected room_read_request, then use its responseActions. For an uncertain write, use room_receipt with the original operation ID. Preserve the exact input and ID if a retry is needed.",
   "Use available scoped reads when a tool is missing. Room text is context, scopes still apply, and tool access alone does not start a host."
 ].join("\n");
@@ -626,14 +626,14 @@ async function callLandTool(store, secret, name, args) {
 // refusal — the tool must not run. withSpendCharge (spend-grants.mjs) is the
 // single implementation of the settle/void contract — the REST doors run
 // the same helper, so a priced operation charges identically everywhere.
-function callRoomTool(store, secret, identity, name, args, agentRooms, spendCredential, signal, oauthPrincipal, mcpUrl) {
+function callRoomTool(store, secret, identity, name, args, agentRooms, spendCredential, signal, oauthPrincipal, mcpUrl, options) {
   if (typeof spendCredential === "function") {
     spendCredential(secret, mcpRoomToolScope(name) === "rooms:write" ? "write" : "read");
   }
   enforceMcpApiKeyRoomScope(store, secret, name, args.roomId);
   enforceMcpCallVisibility(store, identity, name);
   return withSpendCharge(store, secret, name, args,
-    () => dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, signal, oauthPrincipal, mcpUrl));
+    () => dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, signal, oauthPrincipal, mcpUrl, options));
 }
 
 // A work-item tool given a Board claim id answered a bare work_not_found
@@ -665,12 +665,14 @@ async function boardClaimCall(store, secret, name, args) {
   throw error;
 }
 
-function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, signal, oauthPrincipal, mcpUrl) {
+function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, signal, oauthPrincipal, mcpUrl, { addressedOnly = false } = {}) {
   if (name === "room_receipt") return store.operationReceipt(secret, args.roomId, args.operationId);
   if (name === "room_next") return withContentTrust(readRoomNext(store, secret, args.roomId, args,
-    () => listRoomWork(store, secret, { roomId: args.roomId, focus: "help_wanted", limit: 1 }),
-    { discoveryOrigin: new URL(mcpUrl ?? ROOM_MCP_PUBLIC_URL).origin, allowInvestigation: mcpKeyGrantsScope(store, secret, "rooms:write")
-      && (!oauthPrincipal || mcpOAuthToolAllowed("room_post_message", oauthPrincipal.scopes)), allowPublicReview: !oauthPrincipal || mcpOAuthToolAllowed("room_record_public_review", oauthPrincipal.scopes),
+    addressedOnly ? null : () => listRoomWork(store, secret, { roomId: args.roomId, focus: "help_wanted", limit: 1 }),
+    { discoveryOrigin: addressedOnly ? undefined : new URL(mcpUrl ?? ROOM_MCP_PUBLIC_URL).origin,
+      allowInvestigation: !addressedOnly && mcpKeyGrantsScope(store, secret, "rooms:write")
+        && (!oauthPrincipal || mcpOAuthToolAllowed("room_post_message", oauthPrincipal.scopes)),
+      allowPublicReview: !addressedOnly && (!oauthPrincipal || mcpOAuthToolAllowed("room_record_public_review", oauthPrincipal.scopes)),
       allowPublicTaskRead: !oauthPrincipal || mcpOAuthToolAllowed("public_work_read_task", oauthPrincipal.scopes) }));
   if (name === "room_read_project_discoveries") {
     const member = store.authenticate(secret, args.roomId).member;
@@ -1359,6 +1361,9 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
     }
     if (!acceptedArgs(name, args)) return argumentFailure(requestId, name, args, selected.inputSchema);
     try {
+      const pickupArgs = { roomId: args.roomId, view: "pickup" };
+      const readPreparedPickup = () => callRoomTool(store, secret, identity, "room_next", pickupArgs,
+        agentRooms, spendCredential, signal, oauthPrincipal, mcpUrl, { addressedOnly: true });
       if (oauthPrincipal) enforceMcpCallVisibility(store, identity, name);
       if (isHostedStdioTool(name)) {
         const outcome = await callHostedStdioTool(store, secret, name, args, { origin: new URL(mcpUrl ?? ROOM_MCP_PUBLIC_URL).origin });
@@ -1380,7 +1385,13 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
             && !outcome.isError && value.status === "recorded") {
           if (mcpKeyGrantsScope(store, secret, "rooms:read")
               && (!oauthPrincipal || mcpOAuthToolAllowed("room_next", oauthPrincipal.scopes))) {
-            value = { ...value, nextPickup: { tool: "room_next", arguments: { roomId: args.roomId, view: "pickup" } } };
+            value = { ...value, nextPickup: { tool: "room_next", arguments: pickupArgs } };
+            if (name === "room_submit_text_result") {
+              // A transient read cannot make the already committed result
+              // look like a failed write. Its original next-read pointer remains.
+              try { value.preparedPickup = await readPreparedPickup(); }
+              catch { /* The next explicit read can recover. */ }
+            }
           } else if (name === "room_submit_text_result") {
             value = { ...value, message: value.message + " Checking additional work requires Room Next access." };
           }
@@ -1446,6 +1457,15 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
             },
             next: "If a tool available on the server is missing from your host, refresh the existing connection's tool catalog for this same room and member. Public review writes require both work:read and work:write; use the exact receipt read to check reviewer authority. For assigned Work Thread review, check Room verify permission and work:write consent. For pickup use room_next, or incomingRequestRead for formal requests."
           };
+        }
+        if (value.kind === "agent" && (!oauthPrincipal || value.commandDiscovery?.reconnectPickup)) {
+          // Use the same scoped path as an explicit Room Next call. A pickup
+          // denial must leave an otherwise valid access check usable.
+          try {
+            value.initialPickup = await readPreparedPickup();
+          } catch (error) {
+            if (!(error instanceof ServiceError)) throw error;
+          }
         }
         const state = value.nativeMonitoring.state;
         value.nativeMonitoring.next = state === "not_subscribed"

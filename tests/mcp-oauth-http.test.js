@@ -710,6 +710,9 @@ for (const normalized of [false, true]) test(`OAuth work:write lifecycle fits th
     assert.notEqual(response.body.result?.isError, true, `${name}: ${JSON.stringify(response.body).slice(0, 300)}`);
     return reviewed(response.body);
   };
+  const arrival = reviewed((await f.rpc('tools/call', { name: 'room_check_access', arguments: {} })).body);
+  assert.equal(arrival.initialPickup.nextRead.arguments.workItemId, workItemId);
+  assert.equal(arrival.initialPickup.viewerId, 'friend-dot');
   await call('room_accept_work', { expectedRevision: 0, requestId: 'life-accept' });
   await call('room_start_work', { expectedRevision: 1, requestId: 'life-start' });
   await call('room_block_work', { expectedRevision: 2, reason: 'Waiting on an input', nextAction: 'Owner supplies it', requestId: 'life-block' });
@@ -726,6 +729,7 @@ for (const normalized of [false, true]) test(`OAuth work:write lifecycle fits th
   const submitted = await call('room_submit_text_result', submission);
   assert.equal(submitted.result.read.arguments.completionEventId, submitted.eventId);
   assert.deepEqual(submitted.nextPickup, { tool: 'room_next', arguments: { roomId: 'commons', view: 'pickup' } });
+  assert.equal(submitted.preparedPickup.nextRead.arguments.workItemId, nextWorkItemId);
   const replay = await call('room_submit_text_result', submission);
   assert.equal(replay.duplicate, true);
   assert.equal(replay.eventId, submitted.eventId);
@@ -739,6 +743,7 @@ for (const normalized of [false, true]) test(`OAuth work:write lifecycle fits th
     const narrowReplay = await call('room_submit_text_result', submission, (await narrowed.json()).access_token);
     assert.equal(narrowReplay.eventId, submitted.eventId);
     assert.equal(narrowReplay.nextPickup, undefined);
+    assert.equal(narrowReplay.preparedPickup, undefined);
     assert.match(narrowReplay.message, /Checking additional work requires Room Next access/);
     assert.doesNotMatch(narrowReplay.message, /room_check_access/);
     assert.ok(!JSON.stringify(narrowReplay).includes(nextWorkItemId));
@@ -891,6 +896,7 @@ test('room next and receipt discovery distinguish server availability from a nar
   });
   assert.equal(narrowAccess.body.result.structuredContent.commandDiscovery.incomingRequestRead, undefined);
   assert.equal(narrowAccess.body.result.structuredContent.commandDiscovery.reconnectPickup, undefined);
+  assert.equal(narrowAccess.body.result.structuredContent.initialPickup, undefined);
   assert.doesNotMatch(narrowAccess.body.result.structuredContent.nativeMonitoring.next, /room_list_requests|reconnectPickup/);
   for (const name of ['room_next', 'room_receipt']) assert.ok(!narrowList.body.result.tools.some(entry => entry.name === name));
   const denied = await f.rpc('tools/call', { name: tool, arguments: {} }, partial);
@@ -1040,6 +1046,12 @@ for (const normalized of [false, true]) test(`OAuth callback can use its suggest
   const narrow = reviewed((await f.rpc('tools/call', { name: answer.tool, arguments: responseArgs }, (await tokens.json()).access_token)).body);
   assert.equal(narrow.duplicate, true);
   assert.equal(narrow.nextPickup, undefined);
+
+  const freshAccess = await call('room_check_access');
+  assert.deepEqual(freshAccess.initialPickup.work.items, []);
+  assert.deepEqual(freshAccess.initialPickup.requests.items, []);
+  assert.equal(freshAccess.initialPickup.nextRead, null);
+  assert.equal(freshAccess.initialPickup.ifIdle?.investigation, undefined);
 
   let pickup = await call(receipt.nextPickup.tool, receipt.nextPickup.arguments);
   while (pickup.nextRead?.tool === 'room_next') pickup = await call(pickup.nextRead.tool, pickup.nextRead.arguments);
