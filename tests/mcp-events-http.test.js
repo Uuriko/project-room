@@ -13,14 +13,14 @@ import { createRoomServer } from '../server/http.mjs';
 import { createMcpInviteOAuth } from '../server/mcp-invite-oauth.mjs';
 const version = '2026-07-28', origin = 'https://room.example', resource = origin + '/mcp';
 const client = { clientId: 'events-test', name: 'Events test', redirectUris: ['https://client.example/callback'] };
-async function fixture(t, { callbackError, normalized = false } = {}) {
+async function fixture(t, { callbackError, normalized = false, scope = 'rooms:read chat:read chat:write work:read work:write' } = {}) {
   const store = new RoomStore(':memory:');
   store.initialize(initialRoom(), normalized ? { representation: 'normalized-current-v1' } : {});
   const owner = store.issueAccessKey('commons', 'owner');
   const invite = store.invites.create(owner, 'commons', { profile: 'member' });
   const native = createMcpInviteOAuth({ store, clients: [client], resource });
   const verifier = 'a'.repeat(43);
-  const { nonce } = native.begin(new URLSearchParams({ client_id: client.clientId, redirect_uri: client.redirectUris[0], scope: 'rooms:read chat:read chat:write work:read work:write', code_challenge: createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 'S256', resource }));
+  const { nonce } = native.begin(new URLSearchParams({ client_id: client.clientId, redirect_uri: client.redirectUris[0], scope, code_challenge: createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 'S256', resource }));
   const code = new URL(native.approve(nonce, invite.code, 'Friend Dot')).searchParams.get('code');
   const tokens = native.provider.exchangeCode({ code, clientId: client.clientId, redirectUri: client.redirectUris[0], codeVerifier: verifier, resource });
   const grant = store.db.prepare('SELECT * FROM oauth_invite_grants').get();
@@ -47,6 +47,19 @@ async function fixture(t, { callbackError, normalized = false } = {}) {
   const mention = id => store.command(owner, 'commons', { id, type: 'message.posted', data: { messageId: id, body: 'Please report back.', toMemberId: grant.member_id } });
   return { store, owner, server, native, tokens, grant, deliveries, rpc, subscribe, mention, base: `http://127.0.0.1:${server.address().port}` };
 }
+test('native events discovery tells a narrow grant how to find authorized reconnect reads', async t => {
+  const f = await fixture(t, { scope: 'rooms:read chat:read' });
+  const catalog = await f.rpc('events/list');
+  assert.equal(catalog.result.events[0].name, 'room.requested');
+  const guidance = catalog.result.events[0].description;
+  assert.match(guidance, /room_check_access.*reconnectPickup.*incomingRequestRead.*when present/);
+  assert.doesNotMatch(guidance, /call room_list_requests/);
+  const checked = await f.rpc('tools/call', { name: 'room_check_access', arguments: {} });
+  const discovery = checked.result.structuredContent.commandDiscovery;
+  assert.equal(discovery.tools.room_next, 'outside_connected_grant');
+  assert.equal(discovery.reconnectPickup, undefined);
+  assert.equal(discovery.incomingRequestRead, undefined);
+});
 test('authenticated modern Events subscribe -> atomic permitted wake -> signed callback -> revoke', async t => {
   const f = await fixture(t);
   const discovery = await f.rpc('server/discover'); assert.equal(discovery.status, 200); assert.deepEqual(discovery.result.capabilities.events, {});
@@ -94,7 +107,7 @@ for (const normalized of [false, true]) test(`native request wake carries the ex
   assert.match(before.nativeMonitoring.next, /room_list_requests.*direction=incoming.*status=open/);
   assert.match(before.nativeMonitoring.next, /do not replay earlier requests/);
   const catalog = await f.rpc('events/list');
-  assert.match(catalog.result.events[0].description, /room_list_requests.*direction=incoming.*status=open/);
+  assert.match(catalog.result.events[0].description, /room_check_access.*commandDiscovery.reconnectPickup/);
   assert.ok((await f.subscribe()).result.id);
   await f.server.drainMcpEvents();
   assert.equal(f.deliveries.length, 0, 'connecting must not imply replay or execution');
