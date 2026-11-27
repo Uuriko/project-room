@@ -1191,3 +1191,34 @@ test("a quiet event stream can outlive the ordinary request deadline", async t =
   const result = await f.client.waitForChange(after, { timeoutMs: 15500, reviewWorkItemId: "archive" });
   assert.deepEqual(result, { changed: false, through: after });
 });
+test("the selected answer remains readable after accepted and working reports", async t => {
+  const f = await fixture(t), q = f.open(), id = q.command.data.messageId;
+  for (const progress of ["acknowledged", "accepted", "working"]) {
+    const receipt = await f.client.replyAction("room_progress_request", {
+      requestId: `stage-${progress}`, requestMessageId: id, expectedRequestRevision: 0, progress
+    });
+    assert.equal(receipt.status, "recorded");
+  }
+  const open = await f.client.replyContext(id);
+  assert.equal(open.request.progressState, "working");
+  assert.ok(open.request.acceptedAt && open.request.workingAt);
+  const answer = await f.client.replyAction("room_respond_to_request", {
+    requestId: "answer-after-working", responseToRequestId: id, ...open.current.answerBasis,
+    responseOutcome: "answered", workItemId: open.request.workItemId, toMemberId: "owner", body: "The exact evidence is ready."
+  });
+  assert.equal(answer.status, "recorded");
+  const response = await fetch(`${f.origin}/api/rooms/commons/reply-context?requestMessageId=${encodeURIComponent(id)}`, {
+    headers: { authorization: `Bearer ${f.keys.owner}` }
+  });
+  assert.equal(response.status, 200);
+  const settled = validateReplyRead(await response.json(), {
+    name: "room_read_request", args: { requestMessageId: id }, roomId: "commons"
+  });
+  assert.equal(settled.request.status, "answered");
+  assert.equal(settled.request.responseMessageId, answer.messageId);
+  const tampered = structuredClone(settled);
+  tampered.request.workingAt = "2999-01-01T00:00:00.000Z";
+  assert.throws(() => validateReplyRead(tampered, {
+    name: "room_read_request", args: { requestMessageId: id }, roomId: "commons"
+  }), { code: "invalid_response" });
+});
