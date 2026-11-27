@@ -37,10 +37,19 @@ const inventory=s=>Object.fromEntries(['agent_identities','identity_links','even
 test('existing agent lost-response retry preserves identity/grants and finishes first useful task under review',async t=>{
  const{s,peer,inviter,issued,ownerKey,reviewerKey}=fixture(t),beforeIdentities=s.db.prepare('SELECT count(*) n FROM agent_identities').get().n;
  const options={displayName:'Friend existing agent',identitySecret:peer.secret,requestId:'journey-redeem'};
- const server=createRoomServer({store:s});
- await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
- const origin='http://127.0.0.1:'+server.address().port;
- t.after(()=>{server.closeStreams();server.closeAllConnections();return new Promise(resolve=>server.close(resolve));});
+ let server, origin;
+ const connect = async () => {
+  server = createRoomServer({ store: s });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  origin = 'http://127.0.0.1:' + server.address().port;
+ };
+ const disconnect = async () => {
+  server.closeStreams();
+  server.closeAllConnections();
+  await new Promise(resolve => server.close(resolve));
+ };
+ await connect();
+ t.after(disconnect);
  const {identitySecret,...input}=options;
  const res=await fetch(origin+'/api/agent-invites/redeem',{method:'POST',headers:{Authorization:'Bearer '+identitySecret,'Content-Type':'application/json'},
   body:JSON.stringify({code:issued.code,...input})});
@@ -62,7 +71,7 @@ test('existing agent lost-response retry preserves identity/grants and finishes 
  const cmd=(key,id,type,data)=>s.command(key,'commons',{id,type,data}),item=()=>JSON.parse(s.db.prepare("SELECT body FROM work_entities WHERE work_id='task'").get().body);
  cmd(ownerKey,'propose','work.proposed',{workItemId:'task',title:'Useful shared task',definitionOfDone:'Save and review useful result',accountableMemberId:first.memberId,verifierMemberId:'reviewer',independentVerificationRequired:true,ownerDecisionRequired:true,humanDecisionMakerId:'owner',mode:'read'});
  async function mcp(pointer, token=first.mcpToken.credential){
-  const res=await fetch(endpoint,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
+  const res=await fetch(new URL(endpoint.pathname, origin),{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
    body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:pointer.tool,arguments:pointer.arguments}})});
   return (await res.json()).result;
  }
@@ -88,11 +97,61 @@ test('existing agent lost-response retry preserves identity/grants and finishes 
  const chatBrief=(await mcp(chatPickup.nextRead,chat.mcpToken.credential)).structuredContent;
  assert.equal(chatBrief.continuation.action,'permission_required');
  assert.equal(chatBrief.continuation.tool,null);
- cmd(peer.secret,'accept','work.accepted',{workItemId:'task',expectedRevision:0});const body='First useful saved result',posted=cmd(peer.secret,'saved','message.posted',{messageId:'saved',body,workItemId:'task'}),version=textVersion(body);
- const done=cmd(peer.secret,'done','work.completed',{workItemId:'task',expectedRevision:1,evidenceKind:'room_text',evidenceMessageId:'saved',evidenceMessageEventId:posted.event.id,evidenceVersion:version,previousCompletionEventId:null,producerId:peer.identityId,summary:'Saved useful work',nextAction:'Independent review'});
- cmd(reviewerKey,'verify','verification.recorded',{workItemId:'task',expectedRevision:2,result:'pass',completionEventId:done.event.id,evidenceVersion:version,summary:'Reviewed exact saved result'});
+ const peerCall = async (tool, args) => {
+  const result = await mcp({ tool, arguments: { roomId: 'commons', ...args } }, peer.secret);
+  assert.notEqual(result?.isError, true, JSON.stringify(result));
+  assert.ok(result?.structuredContent, tool);
+  return result.structuredContent;
+ };
+ const begin = await peerCall('room_begin_work', { workItemId: 'task', expectedRevision: 0 });
+ assert.equal(begin.working, true);
+ assert.deepEqual(begin.confirmed.map(row => row.action), ['room_accept_work', 'room_start_work']);
+ assert.ok(begin.confirmed[1].eventId);
+ const throughStart = s.headSequence('commons');
+ await disconnect();
+ await connect();
+ const resumed = await peerCall('room_next', { view: 'pickup' });
+ assert.equal(resumed.viewerId, peer.identityId);
+ assert.equal(resumed.nextRead.arguments.workItemId, 'task');
+ assert.equal(resumed.work.items.find(row => row.id === 'task').reason, 'in_progress');
+ const resumedWork = await peerCall(resumed.nextRead.tool, resumed.nextRead.arguments);
+ assert.equal(resumedWork.workItemId, 'task');
+ assert.equal(resumedWork.revision, 2);
+ assert.equal(s.headSequence('commons'), throughStart, 'reconnect and pickup reads do not write another start');
+
+ const body = 'First useful saved result';
+ const posted = await peerCall('room_post_message', { id: 'saved', body, workItemId: 'task' });
+ const version = textVersion(body);
+ const resultInput = {
+  workItemId: 'task', expectedRevision: 2, evidenceMessageId: 'saved', evidenceMessageEventId: posted.event.id,
+  evidenceVersion: version, previousCompletionEventId: null, producerId: peer.identityId,
+  summary: 'Saved useful work', nextAction: 'Independent review', requestId: 'done'
+ };
+ cmd(ownerKey, 'propose-next', 'work.proposed', {
+  workItemId: 'next-task', title: 'Check the next artifact', definitionOfDone: 'Return a cited QA finding',
+  accountableMemberId: peer.identityId, mode: 'read'
+ });
+ const done = await peerCall('room_submit_text_result', resultInput);
+ assert.equal(done.result.read.arguments.completionEventId, done.eventId);
+ const replayedResult = await peerCall('room_submit_text_result', resultInput);
+ assert.equal(replayedResult.duplicate, true);
+ assert.equal(replayedResult.eventId, done.eventId);
+ assert.deepEqual(replayedResult.nextPickup, done.nextPickup);
+ assert.deepEqual(done.nextPickup, { tool: 'room_next', arguments: { roomId: 'commons', view: 'pickup' } });
+ const next = await peerCall(done.nextPickup.tool, done.nextPickup.arguments);
+ assert.equal(next.nextRead.arguments.workItemId, 'next-task');
+ const nextWork = await peerCall(next.nextRead.tool, next.nextRead.arguments);
+ const second = await peerCall('room_begin_work', { workItemId: 'next-task', expectedRevision: nextWork.revision });
+ assert.equal(second.working, true);
+ assert.deepEqual(second.confirmed.map(row => row.action), ['room_accept_work', 'room_start_work']);
+ assert.notEqual(second.confirmed[1].eventId, begin.confirmed[1].eventId);
+ const secondRead = await peerCall('room_read_work', { workItemId: 'next-task' });
+ assert.equal(secondRead.work.state, 'working');
+ assert.equal(item().state, 'completed');
+
+ cmd(reviewerKey,'verify','verification.recorded',{workItemId:'task',expectedRevision:3,result:'pass',completionEventId:done.eventId,evidenceVersion:version,summary:'Reviewed exact saved result'});
  cmd(ownerKey,'rationale','message.posted',{messageId:'rationale',body:'Independent output accepted'});
- cmd(ownerKey,'approve','owner.decision_recorded',{workItemId:'task',expectedRevision:3,decision:'approved',completionEventId:done.event.id,evidenceVersion:version,reason:'Useful result verified',sourceMessageId:'rationale'});
+ cmd(ownerKey,'approve','owner.decision_recorded',{workItemId:'task',expectedRevision:4,decision:'approved',completionEventId:done.eventId,evidenceVersion:version,reason:'Useful result verified',sourceMessageId:'rationale'});
  assert.equal(item().receipt.producerId,peer.identityId);assert.equal(item().decision.decision,'approved');assert.doesNotThrow(()=>auditRecovery(s));
 });
 test('interrupted normalized receipt save rolls back membership, link, invitation burn and proofs',t=>{
