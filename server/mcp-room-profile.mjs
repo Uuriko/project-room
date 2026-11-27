@@ -1425,7 +1425,13 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
                   const sameContribution = savedResult ? completionId === value.eventId
                     : currentResult(work) && work.accountableMemberId === viewerId && work.receipt?.producerId === viewerId
                       && args.toMemberId === work.proposedById;
+                  // Prepared pickup is intentionally current. An answer's supply
+                  // offer must still refer to a completion saved before that answer.
+                  const completionPrecedesAnswer = () => store.db.prepare(
+                    "SELECT 1 FROM events WHERE room_id=? AND id=? AND sequence<?"
+                  ).get(args.roomId, completionId, value.sequence);
                   if (completionId && sameContribution && work.proposedById && work.proposedById !== viewerId
+                    && (savedResult || completionPrecedesAnswer())
                     && !store.wakeQueue.pauseStatus(args.roomId, viewerId)) {
                     value.supplyRequest = { tool: "room_request_reply", arguments: {
                       roomId: args.roomId, workItemId: args.workItemId, toMemberId: work.proposedById,

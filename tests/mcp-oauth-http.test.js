@@ -805,6 +805,34 @@ for (const normalized of [false, true]) test(`OAuth work:write lifecycle fits th
   assert.equal(repeated.eventId, opened.eventId);
   assert.equal(repeated.duplicate, true);
 
+  await call('room_block_work', { workItemId: nextWorkItemId, expectedRevision: 3,
+    reason: 'Revise the evidence', nextAction: 'Save the replacement', requestId: 'life-next-block' });
+  await call('room_resolve_blocker', { workItemId: nextWorkItemId, expectedRevision: 4,
+    resolution: 'The correction is ready', requestId: 'life-next-resolve' });
+  await call('room_start_work', { workItemId: nextWorkItemId, expectedRevision: 5, requestId: 'life-next-restart' });
+  const replacementText = 'The revised second result';
+  const replacementPost = await call('room_post_message', { workItemId: nextWorkItemId, body: replacementText,
+    id: 'life-next-replacement' });
+  const replacement = await call('room_submit_text_result', { ...secondInput, expectedRevision: 6,
+    evidenceMessageId: replacementPost.command.data.messageId, evidenceMessageEventId: replacementPost.event.id,
+    evidenceVersion: textVersionOf(replacementText), previousCompletionEventId: completed.eventId,
+    requestId: 'life-next-submit-replacement' });
+  assert.ok(replacement.sequence > answered.sequence);
+  assert.equal(replacement.supplyRequest.arguments.requestId, `supply-after-${replacement.eventId}`);
+  const oldAnswer = await call(answer.tool, replyArgs);
+  assert.equal(oldAnswer.duplicate, true);
+  assert.equal(oldAnswer.sequence, answered.sequence);
+  assert.equal(oldAnswer.preparedPickup.nextRead, null);
+  assert.equal(oldAnswer.supplyRequest, undefined, 'an old answer cannot refill on behalf of a later completion');
+
+  const queuedWorkItemId = 'oauth-lifecycle-after-replacement';
+  f.store.command(f.ownerKey, 'commons', { id: 'lifecycle-after-replacement-propose', type: 'work.proposed',
+    data: { workItemId: queuedWorkItemId, title: 'Check the next artifact', definitionOfDone: 'Return one finding',
+      accountableMemberId: 'friend-dot', mode: 'read', independentVerificationRequired: false, ownerDecisionRequired: false } });
+  const currentPickup = await call(answer.tool, replyArgs);
+  assert.equal(currentPickup.preparedPickup.nextRead.arguments.workItemId, queuedWorkItemId);
+  assert.equal(currentPickup.supplyRequest, undefined);
+
   const read = reviewed((await f.rpc('tools/call', { name: 'room_read_work', arguments: { workItemId, includeResult: true } })).body);
   assert.equal(read.work.state, 'completed');
   assert.ok(JSON.stringify(read).includes('The finished text'));
