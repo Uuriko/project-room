@@ -298,8 +298,8 @@ test("composite OAuth scope admits only the combined read grant", () => {
   }
 });
 
-test("legacy pickup finds a failed formal request outside the first page without changing continuation", async t => {
-  const f = await privateWorkFixture(t, "legacy");
+async function checkFormalRequestRecovery(t, representation) {
+  const f = await privateWorkFixture(t, representation);
   f.store.dmConsents.request("commons", "owner", f.observer.id, "fixture");
   f.store.dmConsents.decide("commons", f.observer.id, "owner", "approve");
   for (let i = 0; i < 19; i++) {
@@ -344,7 +344,12 @@ test("legacy pickup finds a failed formal request outside the first page without
   assert.deepEqual(closed.value.responseActions, []);
   const after = await f.mcp(f.observer, "room_next", { ...args, view: "pickup" });
   assert.notEqual(after.value.nextRead?.arguments?.requestMessageId, requestMessageId);
-});
+}
+
+for (const representation of ["legacy", "normalized-current-v1"]) {
+  test(`pickup finds a failed formal request outside the first page without changing continuation (${representation})`,
+    t => checkFormalRequestRecovery(t, representation));
+}
 
 test("formal requests paginate independently with no work, and closed requests cannot be answered", async t => {
   const f = await privateWorkFixture(t, "normalized-current-v1");
