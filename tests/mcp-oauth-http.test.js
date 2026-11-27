@@ -6,6 +6,7 @@ import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { mcpOAuthIdentityEpoch } from '../server/mcp-oauth.mjs';
 import { setTier } from '../server/autonomy-tiers.mjs';
+import { makeTestSigner } from '../scripts/helpers/signed-evidence.mjs';
 import { request } from 'node:http';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -948,6 +949,109 @@ test('native reviewer follows Room Next to private project findings on the same 
   assert.equal(nextRead.tool,'room_read_project_discoveries');
   const finding = await f.rpc('tools/call',{name:nextRead.tool,arguments:nextRead.arguments});
   assert.equal(finding.body.result.structuredContent.findings[0].receiptId,(await filed.json()).receiptId);
+});
+
+for (const normalized of [false, true]) test(`OAuth callback can use its suggested investigation after settling (${normalized ? 'normalized' : 'legacy'})`, async t => {
+  const f = await setup(t, { normalized });
+  const roomId = 'commons', repositoryUrl = 'https://example.com/source';
+  const command = (id, type, data) => f.store.command(f.ownerKey, roomId, { id, type, data });
+  const call = async (name, args = {}) => {
+    const { body } = await f.rpc('tools/call', { name, arguments: { roomId, ...args } });
+    assert.equal(refusal(body), null, JSON.stringify(body));
+    return reviewed(body);
+  };
+  const terms = { title: 'Check exact artifact', summary: 'Public scope', acceptanceCriteria: ['Read exact bytes'],
+    repositoryUrl, reward: { kind: 'unpaid' }, approvalPolicy: { mode: 'human' } };
+  for (const [offerId, kind] of [['project', 'project'], ['task', 'task']]) {
+    f.store.projectOffers.create(roomId, 'owner', { requestId: 'create-' + offerId, offerId, reviewerMemberIds: ['owner'],
+      terms: { ...terms, kind } });
+    f.store.projectOffers.transition(roomId, 'owner', offerId, 'publish', { requestId: 'publish-' + offerId, expectedRevision: 1 });
+  }
+  f.store.publicWorkClaims.enable(roomId, 'owner', 'task', { requestId: 'enable', expectedRevision: 2,
+    expectedTermsVersion: 1, repositoryRef: 'main', files: ['README.md'] });
+  const outside = f.store.identities.create('Outside contributor');
+  const claimed = f.store.publicWorkClaims.act('task', outside.secret, 'claim', { requestId: 'claim', expectedTermsVersion: 1 });
+  f.store.publicWorkClaims.act('task', outside.secret, 'finish', {
+    requestId: 'finish', expectedTermsVersion: 1, generation: claimed.task.claim.generation, artifactText: 'Exact public evidence', checksReported: []
+  });
+
+  command('charter', 'room.charter_updated', { expectedRevision: 0, purpose: 'Test unattended pickup', outputs: 'Verify the setup evidence',
+    boundaries: null, escalation: null });
+  const workItemId = 'setup-evidence', body = 'Stored setup notes';
+  command('propose', 'work.proposed', { workItemId, title: 'Record setup notes', definitionOfDone: 'Save the verified setup.',
+    accountableMemberId: 'owner', mode: 'read', independentVerificationRequired: false, ownerDecisionRequired: false });
+  command('accept', 'work.accepted', { workItemId, expectedRevision: 0 });
+  const posted = command('post', 'message.posted', { messageId: 'setup-notes', workItemId, body });
+  const evidence = command('complete', 'work.completed', { workItemId, expectedRevision: 1, evidenceKind: 'room_text',
+    evidenceMessageId: 'setup-notes', evidenceMessageEventId: posted.event.id, evidenceVersion: textVersionOf(body),
+    previousCompletionEventId: null, producerId: 'owner', summary: 'Verified setup', nextAction: 'Use the stored notes' });
+  command('open', 'message.posted', { messageId: 'callback-ask', toMemberId: 'friend-dot', requestKind: 'reply', body: 'Check the current notes.' });
+  const before = await call('room_next', { view: 'pickup' });
+  assert.equal(before.nextRead.tool, 'room_read_request');
+  assert.equal(before.ifIdle?.investigation, undefined);
+  const ask = await call(before.nextRead.tool, before.nextRead.arguments);
+  const answer = ask.responseActions.find(action => action.arguments.responseOutcome === 'answered');
+  await call(answer.tool, { ...answer.arguments, requestId: 'answer-callback', body: 'Current notes checked.' });
+  let pickup = await call('room_next', { view: 'pickup' });
+  while (pickup.nextRead?.tool === 'room_next') pickup = await call(pickup.nextRead.tool, pickup.nextRead.arguments);
+  const lead = pickup.ifIdle.investigation;
+  assert.ok(lead);
+  const ungranted = await f.rpc('tools/call', { name: 'public_work_read_task', arguments: { taskId: 'task' } });
+  assert.ok(refusal(ungranted.body), JSON.stringify(ungranted.body));
+  assert.ok(!(await f.rpc('tools/list')).body.result.tools.some(tool => tool.name === 'public_work_read_task'));
+  assert.equal(lead.nextRead.tool, 'room_read_result');
+  assert.equal(lead.nextRead.arguments.completionEventId, evidence.event.id);
+  assert.equal((await call(lead.nextRead.tool, lead.nextRead.arguments)).selection.status, 'current');
+  const record = { ...lead.record.arguments, body: lead.record.bodyPrefix + 'Verified the pinned setup notes.' };
+  assert.equal((await call(lead.record.tool, record)).duplicate, false);
+  assert.equal((await call(lead.record.tool, record)).duplicate, true);
+  pickup = await call('room_next', { view: 'pickup' });
+  assert.equal(pickup.ifIdle?.investigation, undefined);
+});
+
+for (const normalized of [false, true]) test(`OAuth investigation keeps its external completion after replacement (${normalized ? 'normalized' : 'legacy'})`, async t => {
+  const f = await setup(t, { normalized });
+  const roomId = 'commons', workItemId = 'external-install-review';
+  const sign = makeTestSigner(f.store);
+  const command = (id, type, data) => f.store.command(f.ownerKey, roomId, { id, type, data });
+  const call = async (name, args = {}) => {
+    const { body } = await f.rpc('tools/call', { name, arguments: { roomId, ...args } });
+    assert.equal(refusal(body), null, JSON.stringify(body));
+    return reviewed(body);
+  };
+  const complete = (version, expectedRevision) => {
+    const evidenceUrl = 'https://example.com/install/' + version;
+    return command('complete-' + version, 'work.completed', { workItemId, expectedRevision,
+      summary: 'Installation result ' + version, evidenceUrl, evidenceVersion: version, nextAction: 'Check setup',
+      producerId: 'owner', signedEvidence: sign({ evidenceUrl }) }).event;
+  };
+
+  command('propose', 'work.proposed', { workItemId, title: 'Record install evidence', definitionOfDone: 'Save a signed install check.',
+    accountableMemberId: 'owner', mode: 'read', independentVerificationRequired: false, ownerDecisionRequired: false });
+  command('accept', 'work.accepted', { workItemId, expectedRevision: 0 });
+  const original = complete('a', 1);
+  const pickup = () => call('room_next', { view: 'pickup' });
+  const lead = (await pickup()).ifIdle.investigation;
+  assert.equal(lead.basis.completionEventId, original.id);
+
+  command('block', 'work.blocked', { workItemId, expectedRevision: 2, reason: 'New install notes', nextAction: 'Check the revised notes' });
+  command('resolve', 'work.blocker_resolved', { workItemId, expectedRevision: 3, resolution: 'Updated evidence is ready' });
+  const replacement = complete('b', 4);
+
+  const previous = await call(lead.nextRead.tool, lead.nextRead.arguments);
+  assert.equal(previous.selection?.completionEventId, original.id, 'the saved investigation must not open the replacement');
+  assert.equal(previous.selection.status, 'historical');
+  assert.equal(previous.result.kind, 'external');
+  assert.equal(previous.result.receipt.evidenceUrl, 'https://example.com/install/a');
+  assert.equal(previous.current.completionEventId, replacement.id);
+  assert.match(lead.guidance, /historical/);
+
+  const fresh = (await pickup()).ifIdle.investigation;
+  assert.equal(fresh.basis.completionEventId, replacement.id);
+  assert.notEqual(fresh.record.arguments.id, lead.record.arguments.id);
+  const latest = await call(fresh.nextRead.tool, fresh.nextRead.arguments);
+  assert.equal(latest.selection.status, 'current');
+  assert.equal(latest.result.receipt.evidenceUrl, 'https://example.com/install/b');
 });
 
 test('the preview inspection connector preserves audience and OAuth consent', async t => {
