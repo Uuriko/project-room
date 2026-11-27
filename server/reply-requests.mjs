@@ -42,7 +42,9 @@ function withOverdueActions(db, result, roomId) {
   const waiting = new Set(result.requests.filter(request =>
     request.requesterId === result.viewerId && request.lifecycle?.state === "active"
       && ["acknowledged", "accepted"].includes(request.progress?.state)
-      && !request.lifecycle.stages?.workingAt && now - Date.parse(request.progress.at) >= START_REPORT_WINDOW_MS
+      // An active lifecycle starts at first receipt. Restating acceptance
+      // cannot postpone a missing-start check.
+      && !request.lifecycle.stages?.workingAt && now - Date.parse(request.lifecycle.since) >= START_REPORT_WINDOW_MS
   ).map(request => request.id));
   if (waiting.size) {
     // The projection preserves workingAt only after acceptance. Read the durable
