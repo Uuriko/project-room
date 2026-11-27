@@ -242,7 +242,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     assert.equal(await page.locator("#message-to-select").inputValue(), "guest");
     assert.equal(await page.locator("#message-to-select").isDisabled(), true);
     assert.match(await page.locator("#request-mode-label").textContent(), /Earlier exchange included/);
-    assert.match(await page.locator("#thread-context").textContent(), /includes private messages/);
+    assert.match(await page.locator("#thread-context").textContent(), /^Private · /);
     assert.equal(await page.locator("#composer-options").evaluate(node => node.open), false, "secondary composer options start closed");
     assert.doesNotMatch(await page.locator("#message-form").innerText(), /Visible to everyone here/);
     assert.equal(await (await record(page, "follow-answer")).locator('[data-message-action="request-follow-up"]').evaluate(el => getComputedStyle(el).opacity), "1");

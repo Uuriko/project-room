@@ -748,6 +748,10 @@ const client = new RoomClient({
     $("#decision-review").hidden = true; $("#decision-review").open = false;
     $("#search-list").replaceChildren(); $("#search-list")._content = null; $("#search-count").textContent = "";
     $("#thread-title").textContent = ""; $("#thread-context").textContent = "";
+    $("#thread-conversation").hidden = true;
+    $("#thread-conversation-list").replaceChildren();
+    delete $("#thread-conversation-list")._threadConversationHtml;
+    setText("#thread-conversation-title", "");
     $("#thread-bar").hidden = true; $("#search-results").hidden = true; $("#new-messages-button").hidden = true;
     $("#search-mentions")?.setAttribute("aria-pressed", "false"); $("#search-pinned")?.setAttribute("aria-pressed", "false"); $("#message-search").value = ""; $("#clear-search").hidden = true;
     $("#conversation-announcement").textContent = ""; delete $("#message-list").dataset.view;
@@ -2471,6 +2475,65 @@ function visibleConversationMessages() {
     ? directMessagePeer(message, self) === activeDirectMemberId
     : !message.toMemberId && (currentThreadId || messageChannelId(message) === activeChannelId));
 }
+function renderThreadConversation() {
+  const pane = $("#thread-conversation"), list = $("#thread-conversation-list");
+  const root = currentThreadId && conversation?.byId.get(currentThreadId);
+  pane.hidden = !root;
+  if (!root) {
+    if (list.firstChild) list.replaceChildren();
+    return;
+  }
+
+  // Use the same authenticated projection as the timeline. Unknown parents
+  // from a paged snapshot are excluded instead of being listed as roots.
+  const viewer = session.member.id;
+  const channelId = messageChannelId(root);
+  const matchesAudience = message => activeDirectMemberId
+    ? directMessagePeer(message, viewer) === activeDirectMemberId
+    : !message.toMemberId;
+  const scope = conversation.roots.filter(message => !message.replyToId && matchesAudience(message)
+    && (activeDirectMemberId || messageChannelId(message) === channelId));
+  const recent = scope.slice(-40);
+  if (!recent.includes(root) && scope.includes(root)) recent.unshift(root);
+  pane.hidden = !recent.length;
+  setText("#thread-conversation-title", activeDirectMemberId
+    ? displayName(activeDirectMemberId)
+    : `# ${state.channels[channelId]?.name ?? channelId}`);
+
+  const current = list.querySelector('[aria-current="true"]')?.dataset.threadConversationRoot;
+  const html = recent.map(message => {
+    const author = displayName(message.authorId);
+    const count = conversation.threads.get(message.id).filter(matchesAudience).length - 1;
+    const preview = isMutedBy(state, viewer, message.authorId) ? "Muted message"
+      : message.deletedAt ? "Message deleted"
+        : clipGraphemes((message.body ?? "").replace(/\|\|([^|]+)\|\|/g, "[spoiler]"), 240) || "Attachment";
+    return `<li><button class="thread-conversation-row" type="button" data-thread-conversation-root="${esc(message.id)}"${message === root ? ' aria-current="true"' : ""}>
+      <span class="message-avatar ${state.members[message.authorId]?.kind === "agent" ? "agent" : "human"}" aria-hidden="true">${esc(initials(author))}</span>
+      <span class="thread-conversation-copy"><strong>${esc(author)}</strong><span class="thread-conversation-preview">${esc(preview)}</span>${count ? `<small>${count} ${count === 1 ? "reply" : "replies"}</small>` : ""}</span>
+      <time datetime="${esc(message.createdAt)}">${esc(time(message.createdAt))}</time>
+    </button></li>`;
+  }).join("");
+  if (html === list._threadConversationHtml && list.firstChild) return;
+  const focused = list.contains(document.activeElement) ? document.activeElement.dataset.threadConversationRoot : null;
+  list.innerHTML = html;
+  list._threadConversationHtml = html;
+  if (focused) list.querySelector(`[data-thread-conversation-root="${CSS.escape(focused)}"]`)?.focus({ preventScroll: true });
+  if (current !== root.id) {
+    const row = list.querySelector('[aria-current="true"]');
+    if (row && list.clientHeight) {
+      const bounds = list.getBoundingClientRect(), selected = row.getBoundingClientRect();
+      if (selected.top < bounds.top) list.scrollTop += selected.top - bounds.top;
+      else if (selected.bottom > bounds.bottom) list.scrollTop += selected.bottom - bounds.bottom;
+    }
+  }
+}
+$("#thread-conversation-list").addEventListener("click", event => {
+  const row = event.target.closest("[data-thread-conversation-root]");
+  if (!row) return;
+  const id = row.dataset.threadConversationRoot;
+  if (id === currentThreadId) $("#thread-title").focus({ preventScroll: true });
+  else switchThread(id);
+});
 function openDirectMessage(memberId) {
   if (!Object.hasOwn(state?.members ?? {}, memberId) || state.members[memberId].active === false || state.members[memberId].identityRevoked || busy || requestReading || composerFiles.some(file => file.status === "uploading")) return;
   updatesUi?.close();
@@ -2675,6 +2738,7 @@ function renderMessages() {
   newMessages.forEach(message => locallyOwnedMessageIds.delete(message.id));
   if (arrivalsNeedFileRefresh(newMessages, session?.member?.id)) scheduleRoomFilesRefresh();
   $("#thread-bar").hidden = !currentThreadId;
+  renderThreadConversation();
   const heading = currentThreadId ? "thread-title" : "conversation-title";
   $(".room-main").setAttribute("aria-labelledby", heading);
   $("#skip-link").setAttribute("href", "#" + heading);
@@ -2683,10 +2747,10 @@ function renderMessages() {
   syncComposerAudienceLabel();
   if (currentThreadId) {
     const root = conversation.byId.get(currentThreadId);
-    $("#thread-title").textContent = root ? `Thread with ${name(root.authorId)}` : uiText(pairWindow.loading ? "direct.loadingThread" : "direct.unavailableThread");
+    $("#thread-title").textContent = root ? "Thread" : uiText(pairWindow.loading ? "direct.loadingThread" : "direct.unavailableThread");
     const replies = `${Math.max(0, messages.length - 1)} ${messages.length === 2 ? "reply" : "replies"}`;
-    const audience = messages.some(message => message.toMemberId) ? "includes private messages" : "Room thread";
-    setText("#thread-context", `${audience} · ${replies}`);
+    const audience = activeDirectMemberId ? "Private · " : messages.some(message => message.toMemberId) ? "includes private messages · " : "";
+    setText("#thread-context", audience + replies);
   }
 
   // Retain unchanged message nodes so new arrivals do not discard text selection or focus.
@@ -2892,7 +2956,7 @@ function messageLinksHTML(m, { linked, moderation, count, muted }) {
   // per-member "later" list. Both ride the ⋯ overflow menu.
   const markUnreadHtml = !m.deletedAt ? `<button class="message-to-work" data-message-action="mark-unread" data-message-id="${esc(m.id)}" type="button" title="Mark unread (u)">Mark unread</button>` : "";
   const laterHtml = !m.deletedAt ? `<button class="message-to-work" data-message-action="save" data-message-id="${esc(m.id)}" type="button" aria-pressed="${savedMessageIds.has(m.id)}">${savedMessageIds.has(m.id) ? "Unsave" : "Save"}</button>` : "";
-  const threadHtml = !currentThreadId && count ? `<button class="thread-link" data-message-action="thread" data-message-id="${esc(m.id)}" type="button">${count} ${count === 1 ? "reply" : "replies"} ↗</button>` : "";
+  const threadHtml = !currentThreadId && count ? `<button class="thread-link" data-message-action="thread" data-message-id="${esc(m.id)}" type="button">${count} ${count === 1 ? "reply" : "replies"}</button>` : "";
   const workHtml = !m.deletedAt && can("steer") && !(m.proposal && m.workItemId)
     ? `<button class="message-to-work" data-message-action="work" data-message-id="${esc(m.id)}" type="button">Make this work</button>` : "";
   const decideHtml = !m.deletedAt && can("decide") && state.members[session.member.id]?.kind === "human"

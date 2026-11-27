@@ -156,6 +156,14 @@ for (const width of [1440, 320]) test(`direct conversations ${width}: keyboard n
     assert.ok(pages.every(url => url.searchParams.get('limit') === '50'));
   }
   await page.locator('[data-message-record-id="alice-private"] [data-message-action="reply"]').click();
+  const threadContext = page.locator('#thread-conversation');
+  assert.equal(await threadContext.isVisible(), width === 1440);
+  if (width === 1440) {
+    assert.equal(await threadContext.locator('h2').textContent(), 'Alice');
+    assert.equal(await threadContext.locator('[data-thread-conversation-root="alice-private"]').getAttribute('aria-current'), 'true');
+    assert.equal(await threadContext.locator('[data-thread-conversation-root="public-topic"]').count(), 0);
+    assert.ok(await threadContext.locator('[data-thread-conversation-root]').count() <= 41);
+  }
   assert.equal(await page.locator('#message-to-select').inputValue(), 'alice');
   await input.fill('Reply only to Alice');
   await input.press('Enter');
