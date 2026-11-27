@@ -603,6 +603,8 @@
   "result.releaseReporter": "Latest report by {name}.",
   "result.releaseStageEvidence": "Open {stage} receipt",
   "result.invalidLink": "This result link is invalid. Ask the sender to copy the result link again.",
+  "result.otherRoom": "This result is in another Room.",
+  "result.openLinkedRoomResult": "Open linked result",
   "result.openCurrentVersion": "Open current result",
   "result.releaseRecord": "Open recorded evidence",
   "result.pendingCorrection": "Correction needed",
