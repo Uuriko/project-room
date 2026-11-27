@@ -845,6 +845,7 @@ export function createRoomServer({ store, origin, instanceCard, hostedDiscovery 
   const hostedRoomMcp = createHostedRoomMcp(store, {
     nativeHandler: nativeEvents?.handler,
     nativeStatus: nativeEvents?.status,
+    projectReceiverStreams: () => streams,
     agentRooms, oauthProvider: oauthResource ? oauthProvider : null, inviteOAuthProvider: inviteOAuth?.provider, oauthResource,
     spendCredential: (secret, kind) => spendCredential(kind, rateHash(secret)),
   });

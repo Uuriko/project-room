@@ -139,7 +139,7 @@ test("MCP twin on a normalized agent room: same document, bounded, unknown argum
   store.command(bob.secret, "ps", { id: "acc", type: "work.accepted", data: { workItemId: "item-0", expectedRevision: 0 } });
   store.command(ada.secret, "ps", { id: "m", type: "message.posted", data: { messageId: "m", body: "PROD DEPLOY 234527c7 · strict smoke success · live smoke success · https://x" } });
   store.command(ada.secret, "ps", { id: "m2", type: "message.posted", data: { messageId: "m2", body: "MERGED #9 53e4ecbb · after the deploy" } });
-  const call = args => fetch(`${origin}/room/mcp`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${bob.secret}` },
+  const call = (args, token = bob.secret) => fetch(`${origin}/room/mcp`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify({ jsonrpc: "2.0", id: "t", method: "tools/call", params: { name: "room_project_state", arguments: args } }) }).then(r => r.json());
   const reply = await call({ roomId: "ps" });
   assert.ok(reply.result && !reply.result.isError, JSON.stringify(reply));
@@ -158,8 +158,26 @@ test("MCP twin on a normalized agent room: same document, bounded, unknown argum
   const rest = await fetch(`${origin}/api/rooms/ps/state`, { headers: { authorization: `Bearer ${bob.secret}` } });
   const twin = await rest.json();
   assert.equal(rest.status, 200);
+  const receiver = (await call({ roomId: "ps", receiverMemberId: bob.identityId })).result.structuredContent.receiverAvailability;
+  assert.deepEqual(receiver, { memberId: bob.identityId, workItemId: null, execution: "unverified",
+    state: "readiness_unconfirmed", dispatch: "hold" });
+  assert.equal(state.receiverAvailability, undefined, "ordinary project reads keep their existing shape");
+  const missingReceiver = await call({ roomId: "ps", receiverWorkItemId: "item-0" });
+  assert.ok(missingReceiver.error || missingReceiver.result?.isError);
   const stable = value => JSON.parse(JSON.stringify(value, (key, v) => (key === "evaluatedAt" || key === "quietMin" || key === "contentTrust" ? undefined : v)));
   assert.deepEqual(stable(twin), stable(state), "REST and MCP are the same document (the test clock moves between the two reads)");
+  store.now = () => clock;
+  const stream = await fetch(`${origin}/api/rooms/ps/stream?after=${store.headSequence("ps")}`, { headers: {
+    Authorization: `Bearer ${bob.secret}`,
+    "X-Project-Room-Receiver-Scope": JSON.stringify({ requesters: [ada.identityId], workItems: ["item-0"], requests: [] }),
+    "X-Project-Room-Receiver-State": "waiting_for_work"
+  } });
+  assert.equal(stream.status, 200);
+  const scoped = (await call({ roomId: "ps", receiverMemberId: bob.identityId, receiverWorkItemId: "item-0" }, ada.secret)).result.structuredContent;
+  assert.equal(scoped.receiverAvailability.state, "waiting_for_work");
+  assert.equal(scoped.receiverAvailability.dispatch, "check_existing_work", "a receiver can advertise while it owns accepted work");
+  assert.equal(scoped.receiverAvailability.execution, "unverified");
+  await stream.body.cancel();
   assert.equal((await call({ roomId: "ps", since: 1 })).result?.isError === true || Boolean((await call({ roomId: "ps", since: 1 })).error), true);
   assert.ok(HOSTED_ROOM_MCP_TOOLS.includes("room_project_state"));
 });

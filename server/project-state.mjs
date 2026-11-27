@@ -9,7 +9,9 @@
 // is capped; `truncated` names what was shed and `complete` says whether the
 // work scan reached every item.
 import { nextWorkStep, terminalWork } from "../src/workflow.js";
-import { ownMember } from "../src/events.js";
+import { ownMember, validId } from "../src/events.js";
+import { checkReceiverRoute } from "../src/reply-requests.js";
+import { ServiceError } from "./service-error.mjs";
 import { withheldWorkItem, outsidePrivateWork } from "./work-context.mjs";
 import { isCurrentRoom } from "./current-room-repository.mjs";
 import { readWorkItem } from "./work-repository.mjs";
@@ -33,6 +35,42 @@ export const WORK_MAX_PAGES = 16; // 128 items; beyond that `complete` is false
 export const PREREQUISITE_ITEMS = 24;
 export const PREREQUISITE_READS = 96;
 const PRE_START_STEPS = Object.freeze(["accept", ...PREREQUISITE_GATED_STEPS]);
+export function validProjectReceiverSelection({ receiverMemberId, receiverWorkItemId }) {
+  return (receiverMemberId === undefined || validId(receiverMemberId))
+    && (receiverWorkItemId === undefined || receiverMemberId !== undefined && validId(receiverWorkItemId));
+}
+
+export function observeReceiverRoute(streams, roomId, recipientId, request) {
+  let status = "unknown";
+  for (const entry of streams) {
+    if (entry.roomId !== roomId || entry.memberId !== recipientId || !entry.receiverScope
+      || entry.res.destroyed || entry.res.writableEnded || !entry.stillAuthorized()) continue;
+    if (checkReceiverRoute(entry.receiverScope, request) === "matches_scope") {
+      status = "matches_scope";
+      const since = entry.receiverWaitingSince;
+      if (since) return { status, receiver: { state: "waiting_for_work", since } };
+    } else if (status === "unknown") status = "outside_scope";
+  }
+  return { status };
+}
+
+function selectedReceiver(store, token, roomId, auth, ownerId, receiverMemberId, workItemId, streams) {
+  if (workItemId !== null) {
+    store.workContext(token, roomId, workItemId, { expectedSessionBinding: auth.sessionBinding });
+  }
+  const base = { memberId: receiverMemberId, workItemId, execution: "unverified" };
+  const { status, receiver } = observeReceiverRoute(streams, roomId, receiverMemberId, {
+    requesterId: auth.member.id, workItemId, id: null
+  });
+  if (status === "matches_scope" || auth.member.id === receiverMemberId || auth.member.id === ownerId) {
+    if (store.wakeQueue.pauseStatus(roomId, receiverMemberId)) {
+      return { ...base, state: "paused", dispatch: "hold" };
+    }
+  }
+  if (receiver) return { ...base, state: receiver.state, since: receiver.since, dispatch: "check_existing_work" };
+  return { ...base, state: "readiness_unconfirmed", dispatch: "hold" };
+}
+
 const CAPS = Object.freeze({ inProgress: 10, blocked: 6, needsYou: 6, needsHuman: 6, mergedNotDeployed: 8, receipts: 4, attention: 5 });
 
 const clip = (text, n) => {
@@ -52,7 +90,7 @@ export { parseReceipt };
 // `prerequisites` maps work id → observations ({id,state,satisfied}[]) for
 // not-yet-started work. Omitted entirely (pure callers), rows are unchanged.
 // When supplied, an item without an entry is unknown, not ready.
-export function buildProjectState({ roomId, viewerId, ownerId, sequence, now, live, items, itemsComplete, members, receipts, receiptWindow, attention, latency = null, prerequisites = undefined, macCapabilities = undefined }) {
+export function buildProjectState({ roomId, viewerId, ownerId, sequence, now, live, items, itemsComplete, members, receipts, receiptWindow, attention, latency = null, prerequisites = undefined, macCapabilities = undefined, receiverAvailability = undefined }) {
   const member = id => (id == null || !members ? null : ownMember(members, id));
   const name = id => (id == null ? null : clip(member(id)?.displayName, 24) ?? String(id).slice(0, 12));
   const nowMs = typeof now === "number" ? now : Date.parse(now);
@@ -130,6 +168,7 @@ export function buildProjectState({ roomId, viewerId, ownerId, sequence, now, li
     receiptWindow: receiptWindow ?? null,
     ...(latency ? { latency } : {}),
     ...(macCapabilities ? { macCapabilities } : {}),
+    ...(receiverAvailability ? { receiverAvailability } : {}),
     truncated: {}
   };
   const listed = new Set([...state.inProgress, ...state.blocked].map(row => row.id));
@@ -154,7 +193,12 @@ export function buildProjectState({ roomId, viewerId, ownerId, sequence, now, li
 // bounded readers without growing the store: work comes from currentOverview
 // (the Board/context reader, paged and privacy-filtered), receipts from a capped
 // scan of the latest message events, attention from the viewer's own digest.
-export function readProjectState(store, token, roomId, { expectedSessionBinding = null } = {}) {
+export function readProjectState(store, token, roomId, {
+  expectedSessionBinding = null, receiverMemberId, receiverWorkItemId, streams = []
+} = {}) {
+  if (!validProjectReceiverSelection({ receiverMemberId, receiverWorkItemId })) {
+    throw new ServiceError(422, "invalid_query", "Choose a receiver member and optional work item");
+  }
   return store.readTransaction(() => {
     const auth = store.authenticate(token, roomId, expectedSessionBinding);
     const viewerId = auth.member.id, now = store.now();
@@ -229,6 +273,9 @@ export function readProjectState(store, token, roomId, { expectedSessionBinding 
     try { latency = latencyLine(readResponseLatency(store, token, roomId, { expectedSessionBinding })); } catch { latency = null; }
     return buildProjectState({
       roomId, viewerId, ownerId, sequence: head, now, latency,
+      ...(receiverMemberId && { receiverAvailability: selectedReceiver(
+        store, token, roomId, auth, ownerId, receiverMemberId, receiverWorkItemId ?? null, streams
+      ) }),
       macCapabilities: readMacCapabilities(store, { roomId, viewerId, members, items, now }),
       live: { sourceRevision: SOURCE_REVISION, buildId: BUILD_ID },
       items, itemsComplete: complete, members, receipts, prerequisites, receiptWindow: { fromSeq: floor + 1, throughSeq: head, source: receiptSource }, attention

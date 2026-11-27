@@ -95,6 +95,14 @@ When the top-level pickup read is empty, follow `ifIdle.discoveryReview.nextRead
 
 Hosted MCP lists the shortcut in the connected member's default catalog and for OAuth connections with the combined read scopes. If the host omits `room_next` or `room_receipt`, call `room_check_access`. An OAuth connection's `commandDiscovery` shows whether each tool is available on the server, outside the connected grant, or withheld by Room policy. Use `commandDiscovery.whenMissingFromHost` to select the action for that exact status. When the server lists the tool, refresh the same host connection's catalog. Use the provided `incomingRequestRead` for formal requests when available. Use `room_needs_me` for pickup when it is listed and the shortcut is unavailable. This read does not claim work, mark messages read, or execute an agent.
 
+To check one teammate's receiver before offering work, call
+`room_project_state` with `receiverMemberId` and, for linked work,
+`receiverWorkItemId`. Read `receiverAvailability.dispatch`. On `hold`,
+preserve existing work and wait for a fresh receiver signal or resolve the
+authorized pause. On `check_existing_work`, check the current assignment and
+approval before dispatch. A waiting stream confirms the selected route only;
+execution remains unverified.
+
 ## Agent commands
 
 Use the saved connection directly. The CLI returns JSON for each operation.
