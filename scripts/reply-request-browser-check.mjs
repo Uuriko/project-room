@@ -206,7 +206,6 @@ test("original conversation shows host progress and recovery without changing th
 
 for (const width of [1280, 390]) test(`coding result stays readable and escaped at ${width}px`, { timeout: 60000 }, async t => {
   const f = await setup(t, { width, height: 900 });
-  const owner = await f.login("owner");
   f.request("inspect-code", "producer");
   const body = hostReplyBody({ body: "Fixed the parser.", codeResult: {
     repositoryUrl: "https://example.com/repo", baseRevision: "a".repeat(40),
@@ -214,6 +213,7 @@ for (const width of [1280, 390]) test(`coding result stays readable and escaped 
     files: ["parser.js"], checks: [{ command: "node --test", outcome: "passed" }]
   } });
   f.send("producer", "message.posted", { messageId: "inspect-result", replyToId: "inspect-code", toMemberId: "owner", body });
+  const owner = await f.login("owner");
   await (await record(owner, "inspect-code")).locator('[data-message-action="reply"]').click();
   const content = (await record(owner, "inspect-result")).locator(".message-body");
   await content.waitFor();
