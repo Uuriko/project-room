@@ -2684,7 +2684,9 @@ function renderMessages() {
   if (currentThreadId) {
     const root = conversation.byId.get(currentThreadId);
     $("#thread-title").textContent = root ? `Thread with ${name(root.authorId)}` : uiText(pairWindow.loading ? "direct.loadingThread" : "direct.unavailableThread");
-    setText("#thread-context", `${Math.max(0, messages.length - 1)} ${messages.length === 2 ? "reply" : "replies"} · ${messages.some(message => message.toMemberId) ? "includes private messages" : "visible to everyone in this room"}`);
+    const replies = `${Math.max(0, messages.length - 1)} ${messages.length === 2 ? "reply" : "replies"}`;
+    const audience = messages.some(message => message.toMemberId) ? "includes private messages" : "Room thread";
+    setText("#thread-context", `${audience} · ${replies}`);
   }
 
   // Retain unchanged message nodes so new arrivals do not discard text selection or focus.
@@ -5321,8 +5323,6 @@ function syncComposerHint() {
   const input = $("#message-input");
   input.title = hint;
   input.setAttribute("aria-description", hint);
-  const caption = $("#composer-hint");
-  if (caption) caption.textContent = hint;
   input.enterKeyHint = touchKeyboard.matches ? "enter" : "send";
 }
 touchKeyboard.addEventListener("change", syncComposerHint);
