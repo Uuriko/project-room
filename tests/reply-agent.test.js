@@ -1297,6 +1297,38 @@ test("an acknowledged request remains readable with its exact answer basis", asy
     { code: "invalid_response" });
 });
 
+test("the selected answer remains readable after accepted and working reports", async t => {
+  const f = await fixture(t), q = f.open(), id = q.command.data.messageId;
+  for (const progress of ["acknowledged", "accepted", "working"]) {
+    const receipt = await f.client.replyAction("room_progress_request", {
+      requestId: `stage-${progress}`, requestMessageId: id, expectedRequestRevision: 0, progress
+    });
+    assert.equal(receipt.status, "recorded");
+  }
+  const open = await f.client.replyContext(id);
+  assert.equal(open.request.progressState, "working");
+  assert.ok(open.request.acceptedAt && open.request.workingAt);
+  const answer = await f.client.replyAction("room_respond_to_request", {
+    requestId: "answer-after-working", responseToRequestId: id, ...open.current.answerBasis,
+    responseOutcome: "answered", workItemId: open.request.workItemId, toMemberId: "owner", body: "The exact evidence is ready."
+  });
+  assert.equal(answer.status, "recorded");
+  const response = await fetch(`${f.origin}/api/rooms/commons/reply-context?requestMessageId=${encodeURIComponent(id)}`, {
+    headers: { authorization: `Bearer ${f.keys.owner}` }
+  });
+  assert.equal(response.status, 200);
+  const settled = validateReplyRead(await response.json(), {
+    name: "room_read_request", args: { requestMessageId: id }, roomId: "commons"
+  });
+  assert.equal(settled.request.status, "answered");
+  assert.equal(settled.request.responseMessageId, answer.messageId);
+  const tampered = structuredClone(settled);
+  tampered.request.workingAt = "2999-01-01T00:00:00.000Z";
+  assert.throws(() => validateReplyRead(tampered, {
+    name: "room_read_request", args: { requestMessageId: id }, roomId: "commons"
+  }), { code: "invalid_response" });
+});
+
 test("the request hint skips ordinary room events and contains only exact pointer metadata", async t => {
   const f = await fixture(t), after = f.store.room("commons").sequence;
   f.store.command(f.keys.owner, "commons", { id: "noise", type: "message.posted", data: { messageId: "noise", body: "unrelated" } });
