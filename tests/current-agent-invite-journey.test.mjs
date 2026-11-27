@@ -103,10 +103,20 @@ test('existing agent lost-response retry preserves identity/grants and finishes 
   assert.ok(result?.structuredContent, tool);
   return result.structuredContent;
  };
+ const assertStartedEvent = (eventId, workItemId) => {
+  assert.ok(eventId);
+  const record = s.db.prepare("SELECT body FROM events WHERE room_id=? AND json_extract(body, '$.id')=?")
+    .get('commons', eventId);
+  assert.ok(record, 'the exact Start receipt has a durable event');
+  const event = JSON.parse(record.body);
+  assert.equal(event.type, 'work.started');
+  assert.equal(event.actorId, peer.identityId);
+  assert.equal(event.data.workItemId, workItemId);
+ };
  const begin = await peerCall('room_begin_work', { workItemId: 'task', expectedRevision: 0 });
  assert.equal(begin.working, true);
  assert.deepEqual(begin.confirmed.map(row => row.action), ['room_accept_work', 'room_start_work']);
- assert.ok(begin.confirmed[1].eventId);
+ assertStartedEvent(begin.confirmed[1].eventId, 'task');
  const throughStart = s.headSequence('commons');
  await disconnect();
  await connect();
@@ -144,6 +154,7 @@ test('existing agent lost-response retry preserves identity/grants and finishes 
  const second = await peerCall('room_begin_work', { workItemId: 'next-task', expectedRevision: nextWork.revision });
  assert.equal(second.working, true);
  assert.deepEqual(second.confirmed.map(row => row.action), ['room_accept_work', 'room_start_work']);
+ assertStartedEvent(second.confirmed[1].eventId, 'next-task');
  assert.notEqual(second.confirmed[1].eventId, begin.confirmed[1].eventId);
  const secondRead = await peerCall('room_read_work', { workItemId: 'next-task' });
  assert.equal(secondRead.work.state, 'working');
