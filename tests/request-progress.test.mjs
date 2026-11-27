@@ -206,6 +206,7 @@ for (const representation of [null, 'normalized-current-v1']) test(`a sender can
   progress('helper', 'receipt', {progress: 'acknowledged'});
   assert.equal(read('asker'), undefined);
   t.mock.timers.tick(119_999);
+  progress('helper', 'commitment', {progress: 'accepted'});
   assert.equal(read('asker'), undefined);
   t.mock.timers.tick(1);
   const [hint] = read('asker');
@@ -213,7 +214,8 @@ for (const representation of [null, 'normalized-current-v1']) test(`a sender can
   assert.deepEqual(hint.nextRead, {tool: 'room_read_request', arguments: {roomId: 'commons', requestMessageId: 'ask', view: 'compact'}});
   for (const who of ['helper', 'owner', 'other']) assert.equal(read(who), undefined);
   assert.equal(read('asker', false), undefined);
-  progress('helper', 'commitment', {progress: 'accepted'});
+  progress('helper', 'restated-before-start', {progress: 'accepted'});
+  assert.match(read('asker')[0].guidance, /no work start reported/);
   t.mock.timers.tick(120_000);
   assert.match(read('asker')[0].guidance, /no work start reported/);
   progress('helper', 'start', {progress: 'working'});
