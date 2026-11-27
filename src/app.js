@@ -3009,7 +3009,9 @@ async function refreshRoomFiles(more=false, selectedIds=null, fromRender=false) 
   const roomId = state.room?.id, authSession=client.session, viewKey=conversationViewKey(), ticket={};
   let attempt = null;
   try {
-    const selection=partialWorkSnapshot?more?roomFilesSelection:selectedIds??[...new Set(visibleConversationMessages().filter(m=>!m.pendingSend&&!m.deletedAt).slice(-8).map(m=>m.id))].sort():[];
+    const selection = more ? roomFilesSelection : selectedIds ?? (partialWorkSnapshot
+      ? [...new Set(visibleConversationMessages().filter(m => !m.pendingSend && !m.deletedAt).slice(-8).map(m => m.id))].sort()
+      : []);
     if(partialWorkSnapshot&&!selection.length)return;
     if (fromRender) {
       const key = JSON.stringify([generation, client.sequence, viewKey, selection]);
@@ -3023,8 +3025,8 @@ async function refreshRoomFiles(more=false, selectedIds=null, fromRender=false) 
     const body = await client.request(client.path("/files")+(query.size?'?'+query:''));
     if (generation !== client.generation || state?.room?.id !== roomId || client.session!==authSession || session!==authSession || !client.ownsAccountSession() || conversationViewKey()!==viewKey) return;
     if(partialWorkSnapshot&&(body.contractVersion!==2||body.coverage?.kind!=='selected-messages'||JSON.stringify(body.coverage.messageIds)!==JSON.stringify(selection)||body.coverage.complete!==!body.page?.hasMore||Boolean(body.page?.nextCursor)!==body.page?.hasMore))throw Error(uiText("currentRoom.invalidFileSelection"));
-    const next = partialWorkSnapshot?new Map(roomFilesByMessage):new Map();
-    if(partialWorkSnapshot&&!more)for(const id of selection)next.delete(id);
+    const next = selection.length ? new Map(roomFilesByMessage) : new Map();
+    if (!more) for (const id of selection) next.delete(id);
     for (const file of body.files ?? []) {
       if (file.state !== "committed" || !file.messageId) continue;
       const list = next.get(file.messageId) ?? [];

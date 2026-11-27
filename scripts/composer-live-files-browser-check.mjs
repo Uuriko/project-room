@@ -331,14 +331,15 @@ for (const storage of ["legacy", "normalized"]) {
     const observer = store.issueAccessKey(roomId, "observer");
     send(owner, T.MESSAGE_POSTED, { messageId: "question", toMemberId: "writer", requestKind: "reply", body: "Send the revised project brief" });
     const content = Buffer.from("Reviewed project brief");
-    store.roomAttachments.stage(writer, roomId, {
-      id: "brief-file", filename: "brief.md", mediaType: "text/markdown", data: content.toString("base64"),
-    });
+    const stage = id => store.roomAttachments.stage(writer, roomId, {
+      id, filename: "brief.md", mediaType: "text/markdown", data: content.toString("base64"),
+    }).attachment;
+    const staged = stage("brief-file");
     const server = createRoomServer({ store, streamInterval: 75, credentialReadBurst: 600 });
     const journalPath = join(directory, "private-journal.sqlite");
-    let db = openRequestJournal(journalPath), browser;
+    let db = openRequestJournal(journalPath);
     t.after(async () => {
-      db.close(); await browser?.close(); server.closeStreams(); server.closeAllConnections();
+      db.close(); server.closeStreams(); server.closeAllConnections();
       if (server.listening) await new Promise(resolve => server.close(resolve));
       store.close(); rmSync(directory, { recursive: true, force: true });
     });
@@ -352,15 +353,16 @@ for (const storage of ["legacy", "normalized"]) {
       return fetch(url, options);
     } };
     const execute = async () => { runs++; return { body: "I finished reviewing the project brief." }; };
-    const answer = () => runRequestOnce({ connection, db, execute, requestMessageId: "question", stagedFileId: "brief-file" });
-    const first = await answer();
+    const answer = stagedFileId => runRequestOnce({ connection, db, execute, requestMessageId: "question", stagedFileId });
+    const first = await answer(staged.id);
     assert.equal(first.status, "file_pending");
     assert.equal(first.answerDelivered, true);
     const messageId = first.attachment.messageId;
     const recipient = createRoomClient({ origin, roomId, token: owner });
     assert.deepEqual(await recipient.files([messageId]), []);
 
-    browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+    const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+    t.after(() => browser.close());
     const page = await browser.newPage({ viewport: { width: 390, height: 844 }, serviceWorkers: "block" });
     await page.goto(`${origin}/?room=${roomId}#pr-record/message/${messageId}`);
     await signInFixture(page, owner);
@@ -378,28 +380,49 @@ for (const storage of ["legacy", "normalized"]) {
     const promptCheckCount = await promptCheck.count();
     const menu = row.locator(".message-more summary");
     const checkFiles = row.getByRole("button", { name: "Check files on this answer", exact: true });
-    await menu.press("Enter");
-    await checkFiles.press("Enter", { timeout: 2500 });
+    const checkSelectedFiles = async () => {
+      await menu.press("Enter");
+      const request = page.waitForRequest(value => {
+        const url = new URL(value.url());
+        return url.pathname.endsWith("/files") && url.searchParams.getAll("messageId").includes(messageId);
+      }, { timeout: 3500 });
+      await checkFiles.press("Enter", { timeout: 2500 });
+      return request;
+    };
+    const emptyRead = await checkSelectedFiles();
+    if (storage === "legacy") assert.deepEqual(new URL(emptyRead.url()).searchParams.getAll("messageId"), [messageId]);
     await row.getByRole("status").getByText("No files on this answer.", { exact: true }).waitFor();
     assert.equal(await menu.evaluate(node => node === document.activeElement), true);
-    await page.locator("#message-input").fill("Unsent follow-up to the requester");
-
     offline = false;
     db.close(); db = openRequestJournal(journalPath);
-    const repaired = await answer();
-    assert.deepEqual(repaired.attachment, { fileId: "brief-file", messageId, state: "shared" });
+    let fileId = staged.id;
+    if (storage === "normalized") {
+      store.now = () => staged.expiresAt + 1;
+      const expired = await answer();
+      assert.equal(expired.reason, "attachment_unavailable");
+      assert.equal(expired.attachment.messageId, messageId);
+      fileId = stage("same-brief-restaged").id;
+      // The storage clock crossed the browser session's lifetime. Resume
+      // through the exact answer URL with the same intended reader.
+      await page.goto(`${origin}/?room=${roomId}#pr-record/message/${messageId}`);
+      await signInFixture(page, owner);
+      await row.getByText("I finished reviewing the project brief.", { exact: true }).waitFor();
+      await page.clock.fastForward(6000);
+    }
+    await page.locator("#message-input").fill("Unsent follow-up to the requester");
+    const repaired = await answer(fileId);
+    assert.deepEqual(repaired.attachment, { fileId, messageId, state: "shared" });
     assert.equal(runs, 1);
     assert.equal(answers, 1);
     const files = await recipient.files([messageId]);
-    assert.deepEqual(files.map(file => [file.id, file.messageId]), [["brief-file", messageId]]);
-    assert.deepEqual(Buffer.from((await recipient.file("brief-file")).data, "base64"), content);
+    assert.deepEqual(files.map(file => [file.id, file.messageId, file.sha256]), [[fileId, messageId, staged.sha256]]);
+    assert.deepEqual(Buffer.from((await recipient.file(fileId)).data, "base64"), content);
     const other = createRoomClient({ origin, roomId, token: observer });
-    await assert.rejects(other.file("brief-file"), { status: 404 });
-    assert.equal(await row.locator('[data-download-file="brief-file"]').count(), 0);
+    await assert.rejects(other.file(fileId), { status: 404 });
+    assert.equal(await row.locator(`[data-download-file="${fileId}"]`).count(), 0);
 
-    await menu.press("Enter");
-    await checkFiles.press("Enter", { timeout: 2500 });
-    const file = row.locator('[data-download-file="brief-file"]');
+    await checkSelectedFiles();
+    const file = row.locator(`[data-download-file="${fileId}"]`);
     await file.waitFor();
     assert.equal(await row.getByText("No files on this answer.", { exact: true }).count(), 0);
     if (process.env.ROOM_LATE_ANSWER_FILE_SCREENSHOT && storage === "normalized") {
