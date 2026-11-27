@@ -665,11 +665,12 @@ async function boardClaimCall(store, secret, name, args) {
   throw error;
 }
 
-function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, signal, oauthPrincipal, mcpUrl, { addressedOnly = false } = {}) {
+function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, signal, oauthPrincipal, mcpUrl,
+  { addressedOnly = false, preferWork = false } = {}) {
   if (name === "room_receipt") return store.operationReceipt(secret, args.roomId, args.operationId);
   if (name === "room_next") return withContentTrust(readRoomNext(store, secret, args.roomId, args,
     addressedOnly ? null : () => listRoomWork(store, secret, { roomId: args.roomId, focus: "help_wanted", limit: 1 }),
-    { discoveryOrigin: addressedOnly ? undefined : new URL(mcpUrl ?? ROOM_MCP_PUBLIC_URL).origin,
+    { preferWork, discoveryOrigin: addressedOnly ? undefined : new URL(mcpUrl ?? ROOM_MCP_PUBLIC_URL).origin,
       allowInvestigation: !addressedOnly && mcpKeyGrantsScope(store, secret, "rooms:write")
         && (!oauthPrincipal || mcpOAuthToolAllowed("room_post_message", oauthPrincipal.scopes)),
       allowPublicReview: !addressedOnly && (!oauthPrincipal || mcpOAuthToolAllowed("room_record_public_review", oauthPrincipal.scopes)),
@@ -1362,8 +1363,8 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
     if (!acceptedArgs(name, args)) return argumentFailure(requestId, name, args, selected.inputSchema);
     try {
       const pickupArgs = { roomId: args.roomId, view: "pickup" };
-      const readPreparedPickup = () => callRoomTool(store, secret, identity, "room_next", pickupArgs,
-        agentRooms, spendCredential, signal, oauthPrincipal, mcpUrl, { addressedOnly: true });
+      const readPreparedPickup = (preferWork = false) => callRoomTool(store, secret, identity, "room_next", pickupArgs,
+        agentRooms, spendCredential, signal, oauthPrincipal, mcpUrl, { addressedOnly: true, preferWork });
       if (oauthPrincipal) enforceMcpCallVisibility(store, identity, name);
       if (isHostedStdioTool(name)) {
         const outcome = await callHostedStdioTool(store, secret, name, args, { origin: new URL(mcpUrl ?? ROOM_MCP_PUBLIC_URL).origin });
@@ -1462,7 +1463,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
           // Use the same scoped path as an explicit Room Next call. A pickup
           // denial must leave an otherwise valid access check usable.
           try {
-            value.initialPickup = await readPreparedPickup();
+            value.initialPickup = await readPreparedPickup(true);
           } catch (error) {
             if (!(error instanceof ServiceError)) throw error;
           }

@@ -314,7 +314,7 @@ function unrecordedInvestigation(store, roomId, charter, goal, { project, receip
   };
 }
 
-export function readRoomNext(store, secret, roomId, { source, cursor, view, consideredDiscovery } = {}, readInvitation, { allowPublicReview = false, allowInvestigation = false, allowPublicTaskRead = true, discoveryOrigin } = {}) {
+export function readRoomNext(store, secret, roomId, { source, cursor, view, consideredDiscovery } = {}, readInvitation, { allowPublicReview = false, allowInvestigation = false, allowPublicTaskRead = true, discoveryOrigin, preferWork = false } = {}) {
   if (!validRoomNextSelection({ source, cursor, view, consideredDiscovery }))
     throw new ServiceError(422, "invalid_arguments", "Choose a source and its returned cursor");
   return store.readTransaction(() => {
@@ -351,8 +351,9 @@ export function readRoomNext(store, secret, roomId, { source, cursor, view, cons
     // The default stays readable by clients with the original closed output schema.
     if (view === "pickup") {
       const correction = packet.work?.items.find(item => item.reason === "revise");
-      const addressed = correction?.nextRead ?? recoveryRead
-        ?? packet.requests?.items[0]?.nextRead ?? packet.work?.items[0]?.nextRead;
+      const firstWork = packet.work?.items[0]?.nextRead;
+      const addressed = correction?.nextRead ?? (preferWork ? firstWork : null) ?? recoveryRead
+        ?? packet.requests?.items[0]?.nextRead ?? firstWork;
       packet.nextRead = addressed ?? packet.requests?.nextRead ?? packet.work?.nextRead ?? null;
 
       // A source cursor has already passed its room, viewer and permission checks.
