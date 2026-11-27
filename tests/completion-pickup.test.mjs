@@ -481,6 +481,10 @@ for (const representation of [undefined, "normalized-current-v1"]) for (const in
       assert.equal(response.status, 200);
       return response;
     };
+    const rearmPrimary = async () => {
+      receiver.closeStreams();
+      await connect(primary.secret);
+    };
     const capacityChange = async (action, requestId, reason) => {
       if (ingress === "MCP") {
         const response = await fetch(origin + "/mcp", {
@@ -551,7 +555,42 @@ for (const representation of [undefined, "normalized-current-v1"]) for (const in
     await capacityChange("resume", "provider-recovered");
     await setImmediate();
     assert.equal(latest("completion_pickup.refill"), "receiver_unconfirmed");
-    await connect(primary.secret);
+    const coworkerRequest = buildReplyCommand({ roomId, memberId: "alternate" }, "room_request_reply", {
+      requestId: "coworker-private-work", toMemberId: recipientId, body: "A separate coworker request."
+    });
+    store.command(alternate.secret, roomId, coworkerRequest);
+    assert.ok(!store.replyRequests.list(owner, roomId, { direction: "outgoing", status: "open" })
+      .requests.some(item => item.id === coworkerRequest.data.messageId));
+    await rearmPrimary();
+    await setImmediate();
+    assert.equal(receipt("capacity-restored").status, "not_recorded", "receiver availability does not override another person's open work");
+    assert.equal(latest("completion_pickup.refill"), "pending_work");
+    const cancel = buildReplyCommand({ roomId, memberId: "alternate" }, "room_cancel_request", {
+      requestId: "coworker-work-withdrawn", requestMessageId: coworkerRequest.data.messageId,
+      expectedRequestRevision: 0, reason: "The coworker no longer needs this check."
+    });
+    const assignedWork = "other-assigned-review";
+    store.command(owner, roomId, { id: "other-work-proposal", type: "work.proposed", data: {
+      workItemId: assignedWork, title: "Check the existing setup", definitionOfDone: "Return a source observation.",
+      accountableMemberId: recipientId, mode: "read"
+    } });
+    store.command(primary.secret, roomId, { id: "other-work-accept", type: "work.accepted", data: {
+      workItemId: assignedWork, expectedRevision: 0
+    } });
+    store.command(alternate.secret, roomId, cancel);
+    await setImmediate();
+    assert.equal(receipt("capacity-restored").status, "not_recorded", "an accepted Work Thread elsewhere beats discovery");
+    assert.equal(latest("completion_pickup.refill"), "pending_work");
+    store.command(primary.secret, roomId, { id: "other-work-start", type: "work.started", data: {
+      workItemId: assignedWork, expectedRevision: 1
+    } });
+    await setImmediate();
+    assert.equal(receipt("capacity-restored").status, "not_recorded", "a Work Thread in progress beats discovery");
+    store.command(owner, roomId, { id: "other-work-supersede", type: "work.superseded", data: {
+      workItemId: assignedWork, expectedRevision: 2, supersededByWorkItemId: workItemId,
+      reason: "The current setup work covers this check."
+    } });
+    await rearmPrimary();
     await setImmediate();
     assert.equal(receipt("capacity-restored").status, "recorded");
     assert.equal(receipt("capacity-alternate").eventId, fallbackEvent);
@@ -590,6 +629,7 @@ for (const representation of [undefined, "normalized-current-v1"]) for (const in
     await setImmediate();
     assert.deepEqual(currentRefills().map(item => item.id), [fresh.data.messageId], "pending work wins over new evidence");
     settle(fresh.data.messageId);
+    await rearmPrimary();
     await setImmediate();
     assert.equal(currentRefills().length, 0, "an unapproved result cannot generate new work");
     const reason = "Exact room evidence accepted.";
@@ -605,7 +645,7 @@ for (const representation of [undefined, "normalized-current-v1"]) for (const in
       const exact = store.replyRequests.selected(primary.secret, roomId, followup.id, { view: "compact" });
       assert.ok(exact.page.items[0].message.body.includes(completion.event.id));
       stop(); stop = start();
-      await connect(primary.secret);
+      await rearmPrimary();
       await setImmediate();
       assert.deepEqual(currentRefills().map(item => item.id), [followup.id], "reconnect and restart preserve the exact offer");
       assert.match(exact.page.items[0].message.body, /current.next.action is complete/);
@@ -618,6 +658,7 @@ for (const representation of [undefined, "normalized-current-v1"]) for (const in
       assert.equal(readExact().selection.status, "current", "a superseded Work Thread can still have a readable selected result");
       assert.equal(readExact().current.next.action, "superseded", "the investigation preflight rejects the superseded source");
       settle(followup.id);
+      await rearmPrimary();
     }
     send(owner, "message.posted", { messageId: "unrelated-conversation", body: "Unrelated discussion" });
     await setImmediate();

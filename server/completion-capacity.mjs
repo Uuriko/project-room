@@ -2,11 +2,10 @@ import { createHash } from "node:crypto";
 // Reuse Room's formal requests, authorization and operation receipts.
 import { buildReplyCommand } from "../client/reply-actions.mjs";
 import { validId } from "../src/events.js";
-import { nextWorkStep } from "../src/workflow.js";
 import { SESSION_STATUSES, sessionRecord } from "../src/work-item-session.js";
 import { observeSelectedRuns } from "./request-runs.mjs";
 import { readWorkItem } from "./work-repository.mjs";
-import { recentRoomResult } from "./room-next.mjs";
+import { recentRoomResult, recipientWorkAvailability } from "./room-next.mjs";
 import { CAPACITY_STOP, reportsCapacityStop } from "./wake-queue.mjs";
 
 export { CAPACITY_STOP };
@@ -104,9 +103,9 @@ export function idleRefill(store, { route, secret, refill, hasOpenRequest }, rec
     if (store.authenticate(secret, roomId).member.id !== requesterId) throw new Error("Pickup requester identity changed");
     const pause = store.wakeQueue.pauseStatus(roomId, recipientId);
     if (pause) return { state: reportsCapacityStop(pause.reason) ? "capacity_blocked" : "paused" };
-    const work = readWorkItem(store.db, roomId, workItemId);
-    const nextStep = work && nextWorkStep(work);
-    if (hasOpenRequest(route) || nextStep?.memberId === recipientId) return { state: "pending_work" };
+    if (hasOpenRequest(route)) return { state: "pending_work" };
+    const availability = recipientWorkAvailability(store, roomId, recipientId);
+    if (availability !== "clear") return { state: availability };
     const seed = store.operationReceipt(secret, roomId, refill.id);
     const result = seed.status === "recorded" && seed.eventType === "message.posted"
       && seed.sequence > after && route.idleRefill.discover === true
