@@ -178,6 +178,24 @@ test("MCP twin on a normalized agent room: same document, bounded, unknown argum
   assert.equal(scoped.receiverAvailability.dispatch, "check_existing_work", "a receiver can advertise while it owns accepted work");
   assert.equal(scoped.receiverAvailability.execution, "unverified");
   await stream.body.cancel();
+  const workItemId = "claimed-work";
+  store.command(ada.secret, "ps", { id: "claim-offer", type: "work.proposed", data: {
+    workItemId, title: "Claimed work", definitionOfDone: "Exact result",
+    accountableMemberId: bob.identityId, mode: "write"
+  } });
+  store.command(bob.secret, "ps", { id: "claim-accept", type: "work.accepted", data: { workItemId, expectedRevision: 0 } });
+  store.command(bob.secret, "ps", { id: "claim-acquire", type: "claim.acquired", data: {
+    workItemId, expectedRevision: 1, repository: "example/project", ref: "main", paths: ["src/feature.js"],
+    expiresAt: new Date(clock + 60_000).toISOString()
+  } });
+  store.command(bob.secret, "ps", { id: "claim-start", type: "work.started", data: { workItemId, expectedRevision: 2 } });
+  const claimBefore = store.workContext(ada.secret, "ps", workItemId).work;
+  const beforeUnavailable = store.headSequence("ps");
+  const unavailable = await call({ roomId: "ps", receiverMemberId: bob.identityId, receiverWorkItemId: workItemId }, ada.secret);
+  assert.equal(unavailable.result.structuredContent.receiverAvailability.state, "receiver_unreachable");
+  assert.equal(unavailable.result.structuredContent.receiverAvailability.execution, "unverified");
+  assert.deepEqual(store.workContext(ada.secret, "ps", workItemId).work, claimBefore);
+  assert.equal(store.headSequence("ps"), beforeUnavailable);
   assert.equal((await call({ roomId: "ps", since: 1 })).result?.isError === true || Boolean((await call({ roomId: "ps", since: 1 })).error), true);
   assert.ok(HOSTED_ROOM_MCP_TOOLS.includes("room_project_state"));
 });
