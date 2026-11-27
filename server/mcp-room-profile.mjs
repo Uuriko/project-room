@@ -1428,6 +1428,9 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
               outside_connected_grant: "use_authorized_tools",
               withheld_by_room_policy: "check_room_policy"
             },
+            ...(allowed("room_next") ? {
+              reconnectPickup: { tool: "room_next", arguments: { roomId: value.roomId, view: "pickup" } }
+            } : {}),
             ...(allowed("room_list_requests") && allowed("room_read_request") ? {
               incomingRequestRead: { tool: "room_list_requests", arguments: { roomId: value.roomId,
                 direction: "incoming", status: "open" } }
@@ -1449,7 +1452,14 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
             : state === "subscribed"
               ? "At least one callback is registered for this grant. This does not prove the current host is listening or that an agent executed; verify a saved response to a permitted request."
               : "Native monitoring is not confirmed on this connection. Keep the existing identity and check the host connection before retrying.";
-        value.nativeMonitoring.next += " Subscriptions cover future events; they do not replay earlier requests. On connection or reconnection, call room_list_requests with direction=incoming and status=open in this room, follow every nextRead, then finish each selected room_read_request before responding with its current answerBasis. Keep the existing identity; do not resend saved requests.";
+        value.nativeMonitoring.next += " Subscriptions cover future events; they do not replay earlier requests.";
+        if (value.commandDiscovery?.reconnectPickup) {
+          value.nativeMonitoring.next += " On connection or reconnection, use commandDiscovery.reconnectPickup for assigned Work Threads and requests. Follow all partial pages.";
+        }
+        if (!oauthPrincipal || value.commandDiscovery?.incomingRequestRead) {
+          value.nativeMonitoring.next += " For request-only catch-up, call room_list_requests with direction=incoming and status=open in this room, follow every nextRead, then finish each selected room_read_request before responding with its current answerBasis.";
+        }
+        value.nativeMonitoring.next += " Keep the existing identity; do not resend saved requests.";
       }
       // A minted invite code is a one-time credential: it rides in
       // structuredContent only, never in the text block hosts log

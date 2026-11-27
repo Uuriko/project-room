@@ -81,7 +81,9 @@ and start admission recheck prerequisites on every attempt.
 When a wake provides `data.nextRead`, call that read directly. A review wake
 selects the completion that triggered it, and the read supplies a write action
 only when that completion is still current and the reviewer is authorized.
-Use Room Next to recover after a stale wake or reconnect.
+Use Room Next to recover after a stale wake or reconnect. Native OAuth clients
+can follow the access check's `commandDiscovery.reconnectPickup` when it is
+present to recover both assigned Work Threads and requests under the same grant.
 
 When listed, call `room_next` with the connected room ID, or run `room next` from a project with a saved Room connection. Both use the existing hosted MCP endpoint. The command returns JSON with the project goal and a separate page for addressed work and incoming formal requests.
 

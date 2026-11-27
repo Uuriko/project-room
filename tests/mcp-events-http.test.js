@@ -79,6 +79,10 @@ for (const normalized of [false, true]) test(`native request wake carries the ex
     messageId: id, body: 'Please review the saved handoff.', toMemberId: f.grant.member_id, requestKind: 'reply'
   } });
   ask('before-subscription');
+  f.store.command(f.owner, 'commons', { id: 'assign-before-subscription', type: 'work.proposed', data: {
+    workItemId: 'offline-work', title: 'Check a saved artifact', definitionOfDone: 'Return a cited check',
+    accountableMemberId: f.grant.member_id, mode: 'read'
+  } });
   f.store.command(f.owner, 'commons', { id: 'offline-correction', type: 'message.posted', data: {
     messageId: 'offline-correction', replyToId: 'before-subscription', body: 'Use the revised acceptance check.'
   } });
@@ -97,6 +101,12 @@ for (const normalized of [false, true]) test(`native request wake carries the ex
   const during = await call('room_check_access');
   assert.equal(during.nativeMonitoring.execution, 'not_verified');
   assert.match(during.nativeMonitoring.next, /do not replay earlier requests/);
+  const pickup = during.commandDiscovery.reconnectPickup;
+  assert.deepEqual(pickup, { tool: 'room_next', arguments: { roomId: 'commons', view: 'pickup' } });
+  const reconnected = await call(pickup.tool, pickup.arguments);
+  assert.ok(reconnected.work.items.some(row => row.id === 'offline-work'));
+  assert.ok(reconnected.requests.items.some(row => row.id === 'before-subscription'));
+  assert.equal(f.deliveries.length, 0, 'a reconnect read discovers saved work without starting a host turn');
   const pending = await call('room_list_requests', { direction: 'incoming', status: 'open' });
   assert.ok(pending.requests.some(item => item.id === 'before-subscription'));
   const selected = await call('room_read_request', { requestMessageId: 'before-subscription' });

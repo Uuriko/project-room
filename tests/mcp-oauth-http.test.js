@@ -885,6 +885,8 @@ test('room next and receipt discovery distinguish server availability from a nar
     room_inspect_workspace_preview: 'outside_connected_grant'
   });
   assert.equal(narrowAccess.body.result.structuredContent.commandDiscovery.incomingRequestRead, undefined);
+  assert.equal(narrowAccess.body.result.structuredContent.commandDiscovery.reconnectPickup, undefined);
+  assert.doesNotMatch(narrowAccess.body.result.structuredContent.nativeMonitoring.next, /room_list_requests|reconnectPickup/);
   for (const name of ['room_next', 'room_receipt']) assert.ok(!narrowList.body.result.tools.some(entry => entry.name === name));
   const denied = await f.rpc('tools/call', { name: tool, arguments: {} }, partial);
   assert.match(denied.body.error?.data?.hint ?? '', /outside the connected agent grant/);
