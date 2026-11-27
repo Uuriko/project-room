@@ -88,7 +88,8 @@ export function compileIdleRefill(route, result = null) {
     requestId: operation, toMemberId: recipientId, workItemId,
     body: [route.firstLine ?? `@(${recipientId})`, ...(discover === true ? [
       investigation,
-      "Check room_next or room_list_work for authorized work before investigating. Read a Work Thread that says check_prerequisites to find its exact next step. Preserve work waiting on a visible unfinished prerequisite and keep checking. If an assignment is ready or its readiness cannot be verified, stop this investigation and report the assignment.",
+      "Before investigating, use room_next with view=pickup and follow the Work and request continuations. If room_next is unavailable, use room_list_work and room_list_requests with the same coverage. Exclude this request itself. Read assignments that say check_prerequisites. Keep checking past an assignment waiting on a visible unfinished prerequisite.",
+      "If other work is ready, use this request's current decline action to say you skipped discovery because existing work is ready. Then follow the existing work's next action. If readiness or coverage is uncertain, decline discovery and say what could not be confirmed.",
       result
         ? `Before investigating, call room_read_result with workItemId=${result.workItemId} and completionEventId=${result.completionEventId}. Proceed only if selection.status is current, current.next.action is complete, scope.workVisibility is room, and the evidence is available. If the read is denied, stale, superseded, withdrawn, or still awaiting a gate, settle this request as no longer eligible and stop. Do not substitute another source.`
         : "Otherwise inspect one public or explicitly shared source in this lane for a current issue.",

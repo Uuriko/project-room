@@ -710,15 +710,35 @@ for (const representation of [undefined, "normalized-current-v1"]) for (const in
 }
 
 for (const representation of [undefined, "normalized-current-v1"]) {
-  test(`verified prerequisites distinguish waiting from runnable work (${representation ?? "legacy"})`, t => {
+  test(`verified prerequisites distinguish waiting from runnable work (${representation ?? "legacy"})`, async t => {
     const store = new RoomStore(":memory:");
-    t.after(() => store.close());
     const roomId = "commons", requesterId = "owner", recipientId = "recipient";
     const workItemId = "setup-review", prerequisite = "install-notes", successor = "verify-install";
     store.initialize(initialRoom(), representation ? { representation } : {});
     const owner = store.issueAccessKey(roomId, requesterId);
     const recipient = store.identities.create("Install reviewer");
     linkWithProof(store, owner, roomId, recipient, { memberId: recipientId, permissions: ["accept_work"] });
+    const server = createRoomServer({ store });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    t.after(async () => {
+      server.closeAllConnections();
+      await new Promise(resolve => server.close(resolve));
+      store.close();
+    });
+    const recipientCalls = [];
+    const callAsRecipient = async (name, args) => {
+      recipientCalls.push(name);
+      const response = await fetch(`http://127.0.0.1:${server.address().port}/mcp`, {
+        method: "POST", headers: { Authorization: "Bearer " + recipient.secret, "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call",
+          params: { name, arguments: { roomId, ...args } } })
+      });
+      const answer = await response.json();
+      assert.equal(response.status, 200, JSON.stringify(answer));
+      assert.ok(answer.result?.structuredContent && !answer.result.isError, JSON.stringify(answer));
+      return answer.result.structuredContent;
+    };
     const send = (secret, type, data) => store.command(secret, roomId, { id: randomUUID(), type, data });
     const propose = (id, accountableMemberId, dependsOn = []) => send(owner, "work.proposed", {
       workItemId: id, title: id, definitionOfDone: "Return the current installation evidence.",
@@ -746,6 +766,11 @@ for (const representation of [undefined, "normalized-current-v1"]) {
     assert.equal(attempt(refill.id).state, "refill_requested");
     assert.equal(current().next.action, "wait_prerequisites", "discovery preserves the original assignment");
     assert.equal(attempt(refill.id).state, "no_work_ready");
+    const before = await callAsRecipient("room_next", { view: "pickup" });
+    const requestRead = before.requests.items.find(row => row.id === refill.data.messageId).nextRead;
+    const oldWorkRead = before.work.items.find(row => row.id === successor).nextRead;
+    const waiting = await callAsRecipient(oldWorkRead.tool, oldWorkRead.arguments);
+    assert.equal(waiting.continuation.action, "wait_prerequisites");
 
     send(owner, "work.accepted", { workItemId: prerequisite, expectedRevision: 0 });
     send(owner, "work.started", { workItemId: prerequisite, expectedRevision: 1 });
@@ -759,8 +784,32 @@ for (const representation of [undefined, "normalized-current-v1"]) {
     assert.equal(current().next.action, "start");
     assert.equal(attempt("check-after-unblock").state, "pending_work");
     assert.equal(store.operationReceipt(owner, roomId, "check-after-unblock").status, "not_recorded");
+    recipientCalls.length = 0;
+    // Hold the queued discovery until the writer has finished the prerequisite.
+    const queued = await callAsRecipient(requestRead.tool, requestRead.arguments);
+    assert.equal(queued.request.status, "open");
+    const instructions = queued.page.items.find(row => row.kind === "opened").message.body;
+    assert.match(instructions, /Exclude this request itself/);
+    assert.match(instructions, /use this request's current decline action/);
+    const pickup = await callAsRecipient("room_next", { view: "pickup" });
+    const workRead = pickup.work.items.find(row => row.id === successor).nextRead;
+    const runnable = await callAsRecipient(workRead.tool, workRead.arguments);
+    assert.equal(runnable.continuation.action, "start");
+    const declined = queued.responseActions.find(action => action.arguments.responseOutcome === "declined");
+    await callAsRecipient(declined.tool, { ...declined.arguments, requestId: "skip-stale-discovery",
+      body: "Discovery skipped. My existing assignment is ready." });
+    const settled = store.replyRequests.selected(owner, roomId, refill.data.messageId, { view: "compact" }).request;
+    assert.equal(settled.status, "declined");
+    assert.equal(settled.terminalActorId, recipientId);
+    assert.equal(current().next.action, "start", "declining discovery preserves the ready assignment");
+    const { tool: begin, arguments: beginArgs } = runnable.continuation;
+    assert.equal(begin, "room_begin_work");
+    const started = await callAsRecipient(begin, beginArgs);
+    assert.equal(started.confirmed.at(-1)?.action, "room_start_work");
+    assert.equal(current().next.action, "in_progress");
+    assert.deepEqual(recipientCalls, ["room_read_request", "room_next", "room_read_work", declined.tool, begin]);
 
-    send(owner, "work.superseded", { workItemId: successor, expectedRevision: 1, supersededByWorkItemId: workItemId,
+    send(owner, "work.superseded", { workItemId: successor, expectedRevision: 2, supersededByWorkItemId: workItemId,
       reason: "Use the new install review." });
     const hidden = "private-install-notes", other = "review-restricted-install";
     definePrerequisite(hidden);
