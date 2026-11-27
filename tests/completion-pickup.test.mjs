@@ -117,7 +117,7 @@ for (const representation of [undefined, "normalized-current-v1"]) {
 async function checkPlannedContinuation(t, representation) {
   const directory = mkdtempSync(join(tmpdir(), "room-planned-continuation-"));
   const db = join(directory, "room.sqlite");
-  const roomId = "commons", workItemId = "qa-work";
+  const roomId = "commons", workItemId = "qa-work", independentWorkId = "independent-qa";
   const wallClock = Date.now;
   let now = wallClock();
   const openStore = () => new RoomStore(db, { now: () => now });
@@ -135,6 +135,9 @@ async function checkPlannedContinuation(t, representation) {
   });
   f.store.command(f.keys.owner, roomId, { id: randomUUID(), type: "work.proposed",
     data: { workItemId, title: "QA lane", definitionOfDone: "Return source evidence.", accountableMemberId: requesterId, mode: "read" } });
+  f.store.command(f.keys.owner, roomId, { id: randomUUID(), type: "work.proposed",
+    data: { workItemId: independentWorkId, title: "Review install notes", definitionOfDone: "Verify the setup separately.",
+      accountableMemberId: requesterId, mode: "read" } });
   const after = f.store.headSequence(roomId);
   chmodSync(f.directory, 0o700);
   const checkpointPath = join(f.directory, "checkpoint.json");
@@ -152,9 +155,9 @@ async function checkPlannedContinuation(t, representation) {
       ] },
     })),
   });
-  const request = (name, id) => f.store.command(f.keys.owner, roomId,
+  const request = (name, id, laneWorkItemId = workItemId) => f.store.command(f.keys.owner, roomId,
     buildReplyCommand(identity, "room_request_reply", {
-      requestId: id, toMemberId: name, workItemId, body: "Read-only QA seed.",
+      requestId: id, toMemberId: name, ...(laneWorkItemId && { workItemId: laneWorkItemId }), body: "Read-only QA seed.",
     })).event.data.messageId;
   const requestId = operationId => {
     const receipt = f.store.operationReceipt(f.keys.owner, roomId, operationId);
@@ -179,6 +182,10 @@ async function checkPlannedContinuation(t, representation) {
   const dot = lanes.find(lane => lane.name === "dot");
   f.store.command(dot.agent.secret, roomId, buildReplyCommand({ roomId, memberId: "dot" }, "room_progress_request", {
     requestId: "dot-other-acknowledged", requestMessageId: competing, expectedRequestRevision: 0, progress: "acknowledged",
+  }));
+  const independent = request("dot", "dot-independent", independentWorkId);
+  f.store.command(dot.agent.secret, roomId, buildReplyCommand({ roomId, memberId: "dot" }, "room_progress_request", {
+    requestId: "dot-independent-working", requestMessageId: independent, expectedRequestRevision: 0, progress: "working",
   }));
   await setImmediate();
   for (const { name } of lanes) assert.equal(status(`${name}-second`), "not_recorded");
@@ -213,13 +220,21 @@ async function checkPlannedContinuation(t, representation) {
   stop = start();
   await setImmediate();
   assert.equal(status("claude-third"), "recorded", JSON.stringify(log));
-  assert.equal(status("dot-second"), "recorded");
+  assert.equal(status("dot-second"), "recorded", "an open request on a different Work Thread cannot hold a reviewed follow-up");
+  const independentRead = f.store.replyRequests.selected(dot.agent.secret, roomId, independent, { view: "compact" });
+  assert.equal(independentRead.request.status, "open");
+  assert.equal(independentRead.request.workItemId, independentWorkId);
+  assert.equal(independentRead.request.progressState, "working");
   assert.equal(status("dot-third"), "not_recorded");
   assert.equal(status("muse-second"), "not_recorded");
   assert.equal(f.store.operationReceipt(f.keys.owner, roomId, "claude-second").eventId, originalSecond);
 
+  request("dot", "dot-unlinked", null);
   record("dot-second", "dot");
   record("claude-third", "claude");
+  await setImmediate();
+  assert.equal(status("dot-third"), "not_recorded", "an unlinked request cannot establish independence");
+  record("dot-unlinked", "dot");
   await setImmediate();
   assert.equal(status("dot-third"), "recorded");
   record("dot-third", "dot");

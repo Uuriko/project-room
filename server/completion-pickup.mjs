@@ -36,21 +36,23 @@ function compileContinuation(route) {
 // This dispatcher needs only a yes/no occupancy check across requesters.
 // A participant-visible reply list cannot answer it. Never return a private
 // request ID or body, or treat an overdue open request as settled.
-function recipientHasOpenRequest(store, { roomId, recipientId }) {
+function recipientHasOpenRequest(store, { roomId, recipientId }, workItemId = null) {
   if (isCurrentRoom(store.db, roomId)) {
     return Boolean(store.db.prepare(`
       SELECT 1 FROM current_room_records INDEXED BY current_inbox_open_requests
       WHERE room_id=? AND domain='replyRequests'
         AND json_extract(payload,'$.status')='open' AND json_extract(payload,'$.recipientId')=?
+        AND (? IS NULL OR coalesce(json_extract(payload,'$.workItemId'),?)=?)
       LIMIT 1
-    `).get(roomId, recipientId));
+    `).get(roomId, recipientId, workItemId, workItemId, workItemId));
   }
   return Boolean(store.db.prepare(`
     SELECT 1 FROM rooms, json_each(rooms.projection,'$.replyRequests') AS request
     WHERE rooms.id=? AND json_extract(request.value,'$.status')='open'
       AND json_extract(request.value,'$.recipientId')=?
+      AND (? IS NULL OR coalesce(json_extract(request.value,'$.workItemId'),?)=?)
     LIMIT 1
-  `).get(roomId, recipientId));
+  `).get(roomId, recipientId, workItemId, workItemId, workItemId));
 }
 
 function advanceContinuation(store, { route, secret, continuation }, receiverServer) {
@@ -83,7 +85,10 @@ function advanceContinuation(store, { route, secret, continuation }, receiverSer
           || !receiverServer?.hasRecoveryReceiver({ roomId, recipientId, requesterId, workItemId,
             id: next.data.messageId }, decline.sequence, route.allowUnadvertisedReceiver === true)) return;
     }
-    if (recipientHasOpenRequest(store, route)) return;
+    // A prepared follow-up can coexist with distinct linked work. Keep the
+    // same lane and any unlinked request ahead of another offer. The request
+    // does not reserve an execution slot on the recipient's host.
+    if (recipientHasOpenRequest(store, route, workItemId)) return;
     try {
       const result = store.command(secret, roomId, next);
       continuation.position++;

@@ -69,6 +69,13 @@ requester, recipient, Work Thread, credential path and receiver opener. Set the
 route's `after` sequence before the seed opening. `seedRequestId` is the stable
 operation ID used to send that first formal request.
 
+A configured follow-up can be offered while the same recipient has a request
+on another Work Thread. An open request for the same Work Thread or one
+without a Work Thread keeps priority. These offers use the existing Room
+request record. The recipient follows its current claim, prerequisites and
+host capacity before starting. Discovery and replacement work still follow
+their own admission checks.
+
 ```json
 {
   "seedRequestId": "widget-review-seed",
