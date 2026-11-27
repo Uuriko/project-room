@@ -117,6 +117,11 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_discovery_checkpoint` | 422 | Omit the stale checkpoint to restart finding review | fix+resend | Start the authorized review read again without the stale checkpoint. |
 | `discovery_review_denied` | 403 | A designated project reviewer is required | no | Ask a designated reviewer to inspect or act on the finding. |
 | `invalid_review_runtime` | 422 | The work item or exact review attempt fields are invalid | fix+resend | Read the selected result and use its authorized runtime action with the current revision, completion and attempt. |
+| `invalid_preview_selection` | 422 | Room Preview selection does not identify an exact artifact | fix+resend | Open the selected Work Thread and copy its exact Preview link, including the Room and artifact hash. |
+| `independent_preview_viewer_required` | 403 | The current connection cannot act as the requested independent Preview viewer | no | Use the designated independent viewer's saved Room connection for that exact Preview. |
+| `invalid_pr_attachment` | 422 | The attachment is missing or has invalid Work Thread, GitHub PR, head, revision or operation fields | fix+resend | Re-open the Work Thread and PR. Supply the documented attachment fields with the PR URL, exact head and current work revision. If a previous write is uncertain, retry that original input and operation ID unchanged first. |
+| `invalid_refresh_head` | 422 | The requested refresh head is malformed | re-read | Re-read the attached PR and selected Work Thread, then supply the exact 40-character PR head SHA. |
+| `static_review_binding` | 409 | This PR already uses the Room's static review lane | no | Read the existing review binding and use its review flow. |
 | `review_runtime_denied` | 403 | The caller is outside the assigned verifier runtime scope | no | Use the assigned verifier with the required permission. |
 | `review_runtime_stale` | 409 | The room or exact review target is no longer current | re-read | Open the current Work Thread and follow its current action. Leave the old completion and verdict intact. |
 | `review_runtime_attempt_conflict` | 409 | This selected review already has another attempt | re-read | Read the existing attempt and recover its status before considering another dispatch. |
