@@ -135,11 +135,24 @@ export function installResultReader({ client, getState, getSession, sameSession,
     if (!["verify", "decide", "resolve"].includes(expected)) return null;
     return workActions(item, state.members[getSession().member.id]).find(([action]) => action === expected) ?? null;
   }
-  resultElement("result-work-action")?.addEventListener("click", () => {
+  // The same due action is offered above the text and again at its end. Both
+  // buttons share one eligibility result and one click-time recheck; the end
+  // copy is hidden when the reader is docked, where the top action stays on screen.
+  const workActionButtons = ["result-work-action", "result-work-action-end"].map(resultElement).filter(Boolean);
+  function showWorkAction(action) {
+    const docked = resultReader.classList.contains("result-docked");
+    for (const button of workActionButtons) {
+      button.hidden = !action || (button.id === "result-work-action-end" && docked);
+      button.disabled = isBusy();
+      button.textContent = action?.[1] ?? "";
+    }
+  }
+  const clickWorkAction = () => {
     const view = resultView, item = view && getState()?.workItems[view.workItemId];
     const action = selectedWorkAction(view, item);
     if (action && !isBusy()) onWorkAction(item, action[0]);
-  });
+  };
+  for (const button of workActionButtons) button.addEventListener("click", clickWorkAction);
   const releaseLink = resultElement("result-release-link"), releasePanel = resultElement("result-release-checks");
   if (releaseLink && releasePanel) {
     releaseLink.textContent = uiText("result.releaseChecks");
@@ -297,13 +310,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
         ? uiText("work.thread.nextFor", { name: memberLabel(next.memberId), action: nextLabel })
         : nextLabel;
     }
-    const workAction = resultElement("result-work-action");
-    const action = current && item && selectedWorkAction(view, item);
-    if (workAction) {
-      workAction.hidden = !action;
-      workAction.disabled = isBusy();
-      workAction.textContent = action?.[1] ?? "";
-    }
+    showWorkAction(current && item && selectedWorkAction(view, item));
     const retry = resultElement("result-retry");
     resultElement("result-discuss").hidden = !resultDiscussionMessage(view) && !needsConversation(view);
     resultElement("result-discuss").disabled = !canDiscuss() || Boolean(view.resolving);
@@ -327,7 +334,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
     showOutcome(null);
     resultElement("result-verdict").hidden = true;
     resultElement("result-work-context")?.setAttribute("hidden", "");
-    resultElement("result-work-action")?.setAttribute("hidden", "");
+    showWorkAction(null);
     resultElement("result-status").textContent = ""; resultElement("result-body").textContent = ""; resultElement("result-body").hidden = false;
     resultElement("result-original").hidden = true; resultElement("result-retry").hidden = true; resultElement("result-retry").disabled = true;
     resultElement("result-discuss").hidden = true;
@@ -505,7 +512,7 @@ export function installResultReader({ client, getState, getSession, sameSession,
       showReleaseChecks(null);
       showOutcome(null);
       resultElement("result-work-context")?.setAttribute("hidden", "");
-      resultElement("result-work-action")?.setAttribute("hidden", "");
+      showWorkAction(null);
       resultElement("result-options").open = false;
       resultElement("result-title").textContent = title; resultElement("result-status").textContent = "Loading exact text…"; resultElement("result-body").textContent = ""; resultElement("result-body").hidden = false;
       resultElement("result-original").hidden = true;

@@ -106,6 +106,95 @@ test("a fresh exact result defers catch-up until the reader opens it", { timeout
   assert.equal(cursor(), before);
 });
 
+// Jill (Muse) and Dot found that after a long result the one due review action
+// is only above the text. Same eligibility and click-time check as the top
+// button; this proves the end copy is reachable on a phone and never offered
+// to a viewer who may not take the action.
+async function openFocusedResult(f, { width, height }) {
+  const page = await f.browser.newPage({ viewport: { width, height }, isMobile: width < 700, hasTouch: width < 700,
+    storageState: await f.page.context().storageState() });
+  page.setDefaultTimeout(8000);
+  const errors = []; page.on("pageerror", error => errors.push(error.message));
+  const url = new URL("/?room=commons", f.page.url());
+  url.hash = ["pr-record", "result", f.workItemId, f.item().receipt.eventId].join("/");
+  await page.goto(url.href);
+  await page.waitForFunction(body => document.querySelector("#result-body")?.textContent === body, f.body);
+  await page.locator("#result-dialog.result-focused").waitFor();
+  return { page, errors };
+}
+
+test("focused long result at 390px: the due review action is reachable from the end and opens the same review", { timeout: 40000 }, async t => {
+  const f = await setup(t, { review: true, mobile: true, body: previewBody });
+  const receipt = structuredClone(f.item().receipt), revision = f.item().revision;
+  const { page, errors } = await openFocusedResult(f, { width: 390, height: 844 });
+  t.after(async () => { await page.close(); assert.deepEqual(errors, []); });
+  const top = page.locator("#result-work-action"), end = page.locator("#result-work-action-end");
+  await top.waitFor({ state: "visible" });
+  await end.waitFor({ state: "visible" });
+  assert.equal(await end.textContent(), await top.textContent(), "one eligibility result labels both controls");
+  assert.equal(await end.evaluate(node => node.parentElement.classList.contains("portable-actions") && node.nextElementSibling?.id === "result-discuss"), true);
+  // Read to the end: scroll every scroller around the reader to its bottom.
+  const reach = () => page.evaluate(() => {
+    for (let node = document.querySelector("#result-body"); node; node = node.parentElement) node.scrollTop = node.scrollHeight;
+    window.scrollTo(0, document.documentElement.scrollHeight);
+    const box = id => { const r = document.getElementById(id).getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, height: r.height }; };
+    const end = document.getElementById("result-work-action-end"), r = end.getBoundingClientRect();
+    const hit = document.elementFromPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+    return { height: innerHeight, width: innerWidth, top: box("result-work-action"), end: box("result-work-action-end"), unobscured: hit === end || end.contains(hit),
+      bodyHeight: document.getElementById("result-body").getBoundingClientRect().height, scrollWidth: document.documentElement.scrollWidth };
+  });
+  const atEnd = await reach();
+  assert.ok(atEnd.bodyHeight > atEnd.height, `the result is longer than the phone screen: ${JSON.stringify(atEnd)}`);
+  assert.ok(atEnd.top.bottom <= 0, `precondition: the top action is scrolled out of view: ${JSON.stringify(atEnd)}`);
+  assert.ok(atEnd.end.top >= 0 && atEnd.end.bottom <= atEnd.height + 1 && atEnd.end.left >= 0 && atEnd.end.right <= atEnd.width + 1,
+    `the end action is fully on screen without scrolling back: ${JSON.stringify(atEnd)}`);
+  assert.ok(atEnd.end.height >= 44, "touch-sized primary control");
+  assert.equal(atEnd.unobscured, true);
+  assert.ok(atEnd.scrollWidth <= atEnd.width + 1, "no horizontal scrolling");
+  assert.equal(await end.evaluate(node => getComputedStyle(node).backgroundColor), await top.evaluate(node => getComputedStyle(node).backgroundColor), "primary styling, not the quiet ghost footer style");
+  // Keyboard: from the end of the exact text, the next stop is the action.
+  // The focused reader does not cap the text, so it is not a tab stop itself; a
+  // reader who has read to the end and touches the last line continues from there.
+  await page.evaluate(() => document.getElementById("result-body").scrollIntoView({ block: "end" }));
+  await page.locator("#result-body").click({ position: { x: 4, y: (await page.locator("#result-body").evaluate(node => node.getBoundingClientRect().height)) - 4 } });
+  await page.keyboard.press("Tab");
+  assert.equal(await end.evaluate(node => node === document.activeElement), true,
+    `Tab from the end of the text reaches the action; focus is ${await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 160))}`);
+  await page.keyboard.press("Enter");
+  await page.locator("#action-dialog").waitFor({ state: "visible" });
+  await page.waitForFunction(body => document.querySelector("#action-text-body")?.textContent === body, f.body);
+  assert.equal(await page.locator("#action-fields [name=result]").count(), 1, "the existing review form opened");
+  assert.equal(await page.locator("#action-fields [name=summary]").count(), 1);
+  await page.locator("#cancel-action").click(); await page.locator("#action-dialog").waitFor({ state: "hidden" });
+  assert.equal(f.item().verification, null, "cancelling records nothing");
+  assert.equal(f.item().revision, revision);
+  assert.deepEqual(f.item().receipt, receipt, "the reviewed completion is unchanged");
+  // The action stops being due: both controls leave together and none is stale.
+  f.mutate(T.WORK_BLOCKED, { reason: "Synthetic follow-up", nextAction: "Revisit later" });
+  await page.waitForFunction(() => document.getElementById("result-work-action").hidden && document.getElementById("result-work-action-end").hidden);
+  assert.equal(await end.isVisible(), false);
+});
+
+test("focused long result: the end action is never offered to the author, and is hidden when docked", { timeout: 40000 }, async t => {
+  const author = await setup(t, { body: previewBody });
+  author.complete();
+  const { page, errors } = await openFocusedResult(author, { width: 390, height: 844 });
+  t.after(async () => { await page.close(); assert.deepEqual(errors, []); });
+  await page.locator("#result-work-context").waitFor({ state: "visible" });
+  // Wait for the reader to finish its checks before asserting absence.
+  await page.waitForFunction(() => document.querySelector("#result-status")?.textContent.startsWith("Submitted by"));
+  assert.equal(await page.locator("#result-work-action").isVisible(), false, "the producer cannot review their own result");
+  assert.equal(await page.locator("#result-work-action-end").isVisible(), false, "the end copy follows the same eligibility");
+  assert.equal(await page.locator("#result-work-action-end").evaluate(node => node.hidden), true);
+  const checker = await setup(t, { review: true, body: previewBody });
+  const docked = checker.page;
+  await docked.locator(`[data-work-record-id="${checker.workItemId}"] [data-read-result]`).click();
+  await docked.waitForFunction(body => document.querySelector("#result-body")?.textContent === body, checker.body);
+  await docked.locator("#result-dialog.result-docked").waitFor();
+  await docked.locator("#result-work-action").waitFor({ state: "visible" });
+  assert.equal(await docked.locator("#result-work-action-end").isVisible(), false, "the docked reader keeps one visible primary action");
+});
+
 for (const mobile of [false, true]) test(`native result ${mobile ? "mobile" : "desktop"}: selected old draft becomes exact result`, { timeout: 25000 }, async t => {
   const f = await setup(t, { mobile, body: previewBody }); await f.open(); await f.textReady(); await f.fill();
   assert.equal(await f.page.locator("#action-fields [name=evidenceUrl]").count(), 0);
