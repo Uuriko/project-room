@@ -6,7 +6,7 @@ import { readDirectConversations } from "../conversation-sync.mjs";
 // the legacy room read: room credential, session fence, bearer room scope,
 // read rate, rooms:read for API keys.
 import { validId } from "../../src/events.js";
-import { checkReceiverRoute } from "../../src/reply-requests.js";
+import { observeReceiverRoute } from "../project-state.mjs";
 import { buildRoomBootstrap } from "../room-bootstrap.mjs";
 import { readMessagePage, SNAPSHOT_WINDOW_MESSAGES } from "../snapshot-window.mjs";
 
@@ -60,22 +60,7 @@ export function readRequestRoute(ctx) {
     store.workContext(selected.token, roomId, workItemId, { expectedSessionBinding: fence });
   }
   const request = { requesterId: auth.member.id, workItemId: routeWorkItemId, id };
-  let status = "unknown";
-  let receiver;
-  for (const entry of streams) {
-    if (entry.roomId !== roomId || entry.memberId !== recipientId || !entry.receiverScope
-      || entry.res.destroyed || entry.res.writableEnded) continue;
-    if (checkReceiverRoute(entry.receiverScope, request) === "matches_scope") {
-      status = "matches_scope";
-      const since = entry.receiverWaitingSince;
-      if (since && entry.stillAuthorized()) {
-        receiver = { state: "waiting_for_work", since };
-        break;
-      }
-      continue;
-    }
-    if (status === "unknown") status = "outside_scope";
-  }
+  const { status, receiver } = observeReceiverRoute(streams, roomId, recipientId, request);
   return json(res, 200, { contractVersion: 1, roomId, requesterId: request.requesterId, recipientId,
     workItemId, requestMessageId: id, status, liveness: "unknown", ...(receiver ? { receiver } : {}) });
 }

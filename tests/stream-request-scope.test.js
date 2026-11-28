@@ -62,6 +62,17 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
       new RoomAgentClient({ origin, roomId, memberId, token, fetchImpl });
     const owner = caller("owner"), peer = caller("peer");
     const preview = (agent, options = { workItemId: "approved-work" }) => agent.requestRoute("receiver", options);
+    const state = (token, workItemId = "approved-work") => fetch(origin + "/api/rooms/commons/state?" + new URLSearchParams({
+      receiverMemberId: "receiver", receiverWorkItemId: workItemId
+    }), { headers: { Authorization: "Bearer " + token } });
+    const dispatchState = async token => {
+      const response = await state(token);
+      assert.equal(response.status, 200, await response.clone().text());
+      return (await response.json()).receiverAvailability;
+    };
+    const unconfirmed = { memberId: "receiver", workItemId: "approved-work", execution: "unverified",
+      state: "readiness_unconfirmed", dispatch: "hold" };
+    assert.deepEqual(await dispatchState(keys.owner), unconfirmed);
     const advertised = { requesters: ["owner"], workItems: ["approved-work"], requests: ["private-source"] };
     assert.equal((await preview(owner)).status, "unknown");
     const open = (token, scope, waitingForWork = false) => fetch(origin + "/api/rooms/commons/stream?after=" + sequence, {
@@ -82,6 +93,10 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     const { receiver: availability, ...route } = allowed;
     assert.equal(availability.state, "waiting_for_work");
     assert.ok(Number.isFinite(Date.parse(availability.since)));
+    assert.deepEqual(await dispatchState(keys.owner), { ...unconfirmed, state: "waiting_for_work",
+      since: availability.since, dispatch: "check_existing_work" });
+    assert.deepEqual(await dispatchState(keys.peer), unconfirmed, "out-of-scope members receive no waiting or scope details");
+    assert.notEqual((await state(keys.peer, "private-work")).status, 200, "private Work is not a selectable readiness lane");
     assert.deepEqual(route, {
       contractVersion: 1, roomId: "commons", requesterId: "owner", recipientId: "receiver",
       workItemId: "approved-work", requestMessageId: null, status: "matches_scope", liveness: "unknown",
@@ -117,6 +132,7 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     assert.equal(stale.status, "matches_scope", "the scope remains visible while the old transport stays open");
     assert.equal(stale.receiver, undefined, "a half-open receiver cannot keep its waiting status");
     assert.equal(ready(), false, "expired readiness cannot authorize dispatch");
+    assert.deepEqual(await dispatchState(keys.owner), unconfirmed);
     assert.equal(server.hasRecoveryReceiver(exact, sequence, true), false, "expired scoped readiness is not a legacy receiver");
 
     clock = openedAt + 12_000;
@@ -148,5 +164,10 @@ for (const representation of ["legacy", "normalized-current-v1"]) {
     assert.equal(closed.status, "unknown");
     assert.equal(closed.receiver, undefined);
     assert.equal(store.headSequence("commons"), sequence);
+    store.wakeQueue.pause(keys.owner, "commons", { requestId: "receiver-testing-pause", reason: "private pause reason" },
+      null, { memberId: "receiver" });
+    assert.deepEqual(await dispatchState(keys.owner), { ...unconfirmed, state: "paused" });
+    assert.deepEqual(await dispatchState(keys.peer), unconfirmed);
+
   });
 }
