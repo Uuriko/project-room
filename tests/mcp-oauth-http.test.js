@@ -703,8 +703,8 @@ for (const normalized of [false, true]) test(`OAuth work:write lifecycle fits th
   const workItemId = 'oauth-lifecycle';
   f.store.command(f.ownerKey, 'commons', { id: 'lifecycle-propose', type: 'work.proposed', data: { workItemId, title: 'Do the work over OAuth', definitionOfDone: 'A stored text result',
     accountableMemberId: 'friend-dot', mode: 'read', independentVerificationRequired: false, ownerDecisionRequired: false } });
-  const call = async (name, args) => {
-    const response = await f.rpc('tools/call', { name, arguments: { workItemId, ...args } });
+  const call = async (name, args, token) => {
+    const response = await f.rpc('tools/call', { name, arguments: { workItemId, ...args } }, token);
     assert.notEqual(refusal(response.body), 'current_room_context_unavailable', `${name} exceeded the bounded command context`);
     assert.equal(response.body.error, undefined, `${name}: ${JSON.stringify(response.body).slice(0, 300)}`);
     assert.notEqual(response.body.result?.isError, true, `${name}: ${JSON.stringify(response.body).slice(0, 300)}`);
@@ -717,9 +717,41 @@ for (const normalized of [false, true]) test(`OAuth work:write lifecycle fits th
   await call('room_start_work', { expectedRevision: 4, requestId: 'life-restart' });
   const text = 'The finished text';
   const posted = await call('room_post_message', { body: text, id: 'life-result' });
-  const submitted = await call('room_submit_text_result', { expectedRevision: 5, evidenceMessageId: posted.command.data.messageId, evidenceMessageEventId: posted.event.id,
-    evidenceVersion: textVersionOf(text), previousCompletionEventId: null, producerId: 'friend-dot', summary: 'Done', nextAction: 'None', requestId: 'life-submit' });
-  assert.ok(submitted, 'the result submission returns a structured receipt');
+  const nextWorkItemId = 'oauth-lifecycle-next';
+  f.store.command(f.ownerKey, 'commons', { id: 'lifecycle-next-propose', type: 'work.proposed',
+    data: { workItemId: nextWorkItemId, title: 'Review the next artifact', definitionOfDone: 'Return a cited finding',
+      accountableMemberId: 'friend-dot', mode: 'read', independentVerificationRequired: false, ownerDecisionRequired: false } });
+  const submission = { expectedRevision: 5, evidenceMessageId: posted.command.data.messageId, evidenceMessageEventId: posted.event.id,
+    evidenceVersion: textVersionOf(text), previousCompletionEventId: null, producerId: 'friend-dot', summary: 'Done', nextAction: 'None', requestId: 'life-submit' };
+  const submitted = await call('room_submit_text_result', submission);
+  assert.equal(submitted.result.read.arguments.completionEventId, submitted.eventId);
+  assert.deepEqual(submitted.nextPickup, { tool: 'room_next', arguments: { roomId: 'commons', view: 'pickup' } });
+  const replay = await call('room_submit_text_result', submission);
+  assert.equal(replay.duplicate, true);
+  assert.equal(replay.eventId, submitted.eventId);
+  assert.deepEqual(replay.nextPickup, submitted.nextPickup);
+
+  for (const scope of ['rooms:read work:read work:write', 'work:write']) {
+    const narrowConsent = await f.consent({ scope });
+    const code = new URL(narrowConsent.headers.get('location')).searchParams.get('code');
+    const narrowed = await f.exchange({ grant_type: 'authorization_code', code, client_id: CLIENT.clientId,
+      redirect_uri: CLIENT.redirectUris[0], code_verifier: verifier, resource });
+    const narrowReplay = await call('room_submit_text_result', submission, (await narrowed.json()).access_token);
+    assert.equal(narrowReplay.eventId, submitted.eventId);
+    assert.equal(narrowReplay.nextPickup, undefined);
+    assert.match(narrowReplay.message, /Checking additional work requires Room Next access/);
+    assert.doesNotMatch(narrowReplay.message, /room_check_access/);
+    assert.ok(!JSON.stringify(narrowReplay).includes(nextWorkItemId));
+  }
+
+  const { tool, arguments: pickupArgs } = submitted.nextPickup;
+  const pickup = reviewed((await f.rpc('tools/call', { name: tool, arguments: pickupArgs })).body);
+  assert.equal(pickup.nextRead.arguments.workItemId, nextWorkItemId);
+  const next = await call(pickup.nextRead.tool, pickup.nextRead.arguments);
+  assert.equal(next.continuation.arguments.workItemId, nextWorkItemId);
+  await call('room_accept_work', { workItemId: nextWorkItemId, expectedRevision: 0, requestId: 'life-next-accept' });
+  await call('room_start_work', { workItemId: nextWorkItemId, expectedRevision: 1, requestId: 'life-next-start' });
+
   const read = reviewed((await f.rpc('tools/call', { name: 'room_read_work', arguments: { workItemId, includeResult: true } })).body);
   assert.equal(read.work.state, 'completed');
   assert.ok(JSON.stringify(read).includes('The finished text'));
@@ -858,6 +890,8 @@ test('room next and receipt discovery distinguish server availability from a nar
     room_inspect_workspace_preview: 'outside_connected_grant'
   });
   assert.equal(narrowAccess.body.result.structuredContent.commandDiscovery.incomingRequestRead, undefined);
+  assert.equal(narrowAccess.body.result.structuredContent.commandDiscovery.reconnectPickup, undefined);
+  assert.doesNotMatch(narrowAccess.body.result.structuredContent.nativeMonitoring.next, /room_list_requests|reconnectPickup/);
   for (const name of ['room_next', 'room_receipt']) assert.ok(!narrowList.body.result.tools.some(entry => entry.name === name));
   const denied = await f.rpc('tools/call', { name: tool, arguments: {} }, partial);
   assert.match(denied.body.error?.data?.hint ?? '', /outside the connected agent grant/);
@@ -991,8 +1025,23 @@ for (const normalized of [false, true]) test(`OAuth callback can use its suggest
   assert.equal(before.ifIdle?.investigation, undefined);
   const ask = await call(before.nextRead.tool, before.nextRead.arguments);
   const answer = ask.responseActions.find(action => action.arguments.responseOutcome === 'answered');
-  await call(answer.tool, { ...answer.arguments, requestId: 'answer-callback', body: 'Current notes checked.' });
-  let pickup = await call('room_next', { view: 'pickup' });
+  const responseArgs = { ...answer.arguments, requestId: 'answer-callback', body: 'Current notes checked.' };
+  const receipt = await call(answer.tool, responseArgs);
+  assert.equal(receipt.next.tool, 'room_read_request');
+  assert.deepEqual(receipt.nextPickup, { tool: 'room_next', arguments: { roomId, view: 'pickup' } });
+  const replay = await call(answer.tool, responseArgs);
+  assert.equal(replay.duplicate, true);
+  assert.deepEqual(replay.nextPickup, receipt.nextPickup);
+
+  const narrowConsent = await f.consent({ scope: 'rooms:read chat:read chat:write' });
+  const code = new URL(narrowConsent.headers.get('location')).searchParams.get('code');
+  const tokens = await f.exchange({ grant_type: 'authorization_code', code, client_id: CLIENT.clientId,
+    redirect_uri: CLIENT.redirectUris[0], code_verifier: verifier, resource });
+  const narrow = reviewed((await f.rpc('tools/call', { name: answer.tool, arguments: responseArgs }, (await tokens.json()).access_token)).body);
+  assert.equal(narrow.duplicate, true);
+  assert.equal(narrow.nextPickup, undefined);
+
+  let pickup = await call(receipt.nextPickup.tool, receipt.nextPickup.arguments);
   while (pickup.nextRead?.tool === 'room_next') pickup = await call(pickup.nextRead.tool, pickup.nextRead.arguments);
   const lead = pickup.ifIdle.investigation;
   assert.ok(lead);

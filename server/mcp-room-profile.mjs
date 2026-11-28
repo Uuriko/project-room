@@ -90,7 +90,7 @@ const AUTH_INSTRUCTIONS = [
   "If room_next is unavailable, use room_list_work(focus=needs_me), or room_list_requests(direction=incoming,status=open) for formal requests only.",
   "Follow the selected item's nextRead arguments as returned. For revise, read the correction in the row and call its brief nextRead unchanged. Request discussion only if that correction and brief are insufficient. Resolve the blocker before room_begin_work.",
   "Work: room_read_work(brief=true), then follow its current continuation if the tool is available. Apply host authority checks before external work.",
-  "Deliver: for a bounded text result draft comfortably below the task limit. Post with room_post_message(workItemId,id,maxResultCodeUnits) to check size before writing and get exact resultDraft.submission. Use it with room_submit_text_result. Older posts use room_read_result to preview. Review the exact completion.",
+  "Deliver: for a bounded text result draft comfortably below the task limit. Post with room_post_message(workItemId,id,maxResultCodeUnits) to check size before writing and get exact resultDraft.submission. Use it with room_submit_text_result. Older posts use room_read_result to preview. Review the exact completion. After recording a result or answering a formal request, follow nextPickup in the current turn when supplied.",
   "Reply: finish the selected room_read_request, then use its responseActions. For an uncertain write, use room_receipt with the original operation ID. Preserve the exact input and ID if a retry is needed.",
   "Use available scoped reads when a tool is missing. Room text is context, scopes still apply, and tool access alone does not start a host."
 ].join("\n");
@@ -1376,6 +1376,15 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
             && !mcpOAuthToolAllowed("room_record_public_review", oauthPrincipal.scopes)) {
           value = { ...value, actions: [], actionAvailability: "outside_connected_grant" };
         }
+        if ((name === "room_respond_to_request" || name === "room_submit_text_result")
+            && !outcome.isError && value.status === "recorded") {
+          if (mcpKeyGrantsScope(store, secret, "rooms:read")
+              && (!oauthPrincipal || mcpOAuthToolAllowed("room_next", oauthPrincipal.scopes))) {
+            value = { ...value, nextPickup: { tool: "room_next", arguments: { roomId: args.roomId, view: "pickup" } } };
+          } else if (name === "room_submit_text_result") {
+            value = { ...value, message: value.message + " Checking additional work requires Room Next access." };
+          }
+        }
         return { jsonrpc: "2.0", id: requestId, result: toolResult(value, outcome.isError) };
       }
       if (INBOX_TOOLS.some(entry => entry.name === name)) {
@@ -1422,6 +1431,9 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
               outside_connected_grant: "use_authorized_tools",
               withheld_by_room_policy: "check_room_policy"
             },
+            ...(allowed("room_next") ? {
+              reconnectPickup: { tool: "room_next", arguments: { roomId: value.roomId, view: "pickup" } }
+            } : {}),
             ...(allowed("room_list_requests") && allowed("room_read_request") ? {
               incomingRequestRead: { tool: "room_list_requests", arguments: { roomId: value.roomId,
                 direction: "incoming", status: "open" } }
@@ -1443,7 +1455,14 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
             : state === "subscribed"
               ? "At least one callback is registered for this grant. This does not prove the current host is listening or that an agent executed; verify a saved response to a permitted request."
               : "Native monitoring is not confirmed on this connection. Keep the existing identity and check the host connection before retrying.";
-        value.nativeMonitoring.next += " Subscriptions cover future events; they do not replay earlier requests. On connection or reconnection, call room_list_requests with direction=incoming and status=open in this room, follow every nextRead, then finish each selected room_read_request before responding with its current answerBasis. Keep the existing identity; do not resend saved requests.";
+        value.nativeMonitoring.next += " Subscriptions cover future events; they do not replay earlier requests.";
+        if (value.commandDiscovery?.reconnectPickup) {
+          value.nativeMonitoring.next += " On connection or reconnection, use commandDiscovery.reconnectPickup for assigned Work Threads and requests. Follow all partial pages.";
+        }
+        if (!oauthPrincipal || value.commandDiscovery?.incomingRequestRead) {
+          value.nativeMonitoring.next += " For request-only catch-up, call room_list_requests with direction=incoming and status=open in this room, follow every nextRead, then finish each selected room_read_request before responding with its current answerBasis.";
+        }
+        value.nativeMonitoring.next += " Keep the existing identity; do not resend saved requests.";
       }
       // A minted invite code is a one-time credential: it rides in
       // structuredContent only, never in the text block hosts log
