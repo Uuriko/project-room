@@ -14,6 +14,7 @@ import { withRequestState } from "./request-states.mjs";
 
 export const REPLY_PAGE_LIMIT = 20, REPLY_MAX_PAGE_LIMIT = 50, REPLY_PAGE_BYTES = 65536;
 const RETAINED_EARLIER_EXCHANGE_BYTES = 4096;
+const START_REPORT_WINDOW_MS = 120_000;
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 const encode = value => Buffer.from(JSON.stringify(value)).toString("base64url");
 const fail = (code, message, status = 422) => { throw Object.assign(new Error(message), { code, status }); };
@@ -36,20 +37,48 @@ const statefulRequest = request => withRequestState({ ...compactRequest(request)
   ...(request.progressState ? { progress: { state: request.progressState, note: request.progressNote ?? null, at: request.lastActivityAt ?? null } } : {}) }, request);
 // Keep metadata alongside the list so older clients can still validate their
 // exact per-request schema. Only recommend an existing, participant-bound read.
-function withOverdueActions(result, roomId) {
-  const overdueActions = result.requests.filter(request => request.lifecycle?.state === "stale")
-    .map(request => {
-      const incoming = request.recipientId === result.viewerId;
-      return {
-        requestMessageId: request.id,
-        guidance: incoming
-          ? "Read the request. Answer if it is still useful, ask for any missing input, or decline with a reason."
-          : request.lifecycle.unresponsive
-            ? "Read the request. Check whether delivery reached the recipient. If work must move, cancel this ask with a reason before reassigning it."
-            : "Read the request. Confirm whether the recipient is still working. Clarify the blocker or cancel with a reason before reassigning.",
-        nextRead: { tool: "room_read_request", arguments: { roomId, requestMessageId: request.id, view: "compact" } }
-      };
+function withOverdueActions(db, result, roomId) {
+  const now = Date.now();
+  const waiting = new Set(result.requests.filter(request =>
+    request.requesterId === result.viewerId && request.lifecycle?.state === "active"
+      && ["acknowledged", "accepted"].includes(request.progress?.state)
+      // An active lifecycle starts at first receipt. Restating acceptance
+      // cannot postpone a missing-start check.
+      && !request.lifecycle.stages?.workingAt && now - Date.parse(request.lifecycle.since) >= START_REPORT_WINDOW_MS
+  ).map(request => request.id));
+  if (waiting.size) {
+    // The projection preserves workingAt only after acceptance. Read the durable
+    // working reports for these exact requests before telling the sender.
+    const started = db.prepare(`SELECT DISTINCT json_extract(body,'$.data.requestMessageId') AS id
+      FROM events
+      WHERE room_id=? AND json_extract(body,'$.type')='reply_request.progressed'
+        AND json_extract(body,'$.data.progress')='working'
+        AND json_extract(body,'$.data.requestMessageId') IN (SELECT value FROM json_each(?))`)
+      .all(roomId, JSON.stringify([...waiting]));
+    for (const {id} of started) waiting.delete(id);
+  }
+  const overdueActions = [];
+  for (const request of result.requests) {
+    const incoming = request.recipientId === result.viewerId;
+    const stale = request.lifecycle?.state === "stale";
+    const startUnconfirmed = waiting.has(request.id);
+    const acknowledgmentMissing = request.requesterId === result.viewerId && request.lifecycle?.state === "pending"
+      && request.lifecycle.unresponsive && !request.progress && now - Date.parse(request.createdAt) >= START_REPORT_WINDOW_MS;
+    if (!stale && !startUnconfirmed && !acknowledgmentMissing) continue;
+    overdueActions.push({
+      requestMessageId: request.id,
+      guidance: acknowledgmentMissing
+        ? "No acknowledgment yet. Read the request to check its current status. Delivery may still be in progress."
+        : startUnconfirmed
+          ? "Acknowledged, but no work start reported. Read the request and check with the recipient before reassigning it."
+          : incoming
+            ? "Read the request. Answer if it is still useful, ask for any missing input, or decline with a reason."
+            : request.lifecycle.unresponsive
+              ? "Read the request. Check whether delivery reached the recipient. If work must move, cancel this ask with a reason before reassigning it."
+              : "Read the request. Confirm whether the recipient is still working. Clarify the blocker or cancel with a reason before reassigning.",
+      nextRead: { tool: "room_read_request", arguments: { roomId, requestMessageId: request.id, view: "compact" } }
     });
+  }
   return overdueActions.length ? { ...result, overdueActions } : result;
 }
 const requestInHistory = (request, floor) => messageInHistory({ id: request.id, createdAt: request.createdAt }, floor);
@@ -136,7 +165,7 @@ export class ReplyRequests {
     options=selection;
     const {direction="incoming",status="open",expectedSessionBinding=null}=options;
     const shapeRequest=states?statefulRequest:compactRequest;
-    if(isCurrentRoom(this.store.db,roomId))return withOverdueActions(readCurrentReplies(this.store,token,roomId,"list",options,{scope,compactRequest:shapeRequest,readMessage,responseTemplates}), roomId);
+    if(isCurrentRoom(this.store.db,roomId))return withOverdueActions(this.store.db, readCurrentReplies(this.store,token,roomId,"list",options,{scope,compactRequest:shapeRequest,readMessage,responseTemplates}), roomId);
     if(options.cursor!==undefined||options.limit!==undefined)fail("invalid_reply_selection","Legacy request lists do not accept pagination; omit cursor and limit");
     if (!["incoming", "outgoing", "both"].includes(direction) || !["open", "answered", "declined", "cancelled", "all"].includes(status))
       fail("invalid_reply_selection", "Choose a request direction and current status");
@@ -155,7 +184,7 @@ export class ReplyRequests {
       // visible, so their horizon still reaches it.
       const evaluatedThrough = visibleSequenceHorizon(this.store.db, roomId, auth.member.id, room.sequence,
         auth.member.id === this.store.roomOwnerId(roomId));
-      return withOverdueActions({ viewerId: auth.member.id, evaluatedThrough, selection: { direction, status }, requests, nextReads }, roomId);
+      return withOverdueActions(this.store.db, { viewerId: auth.member.id, evaluatedThrough, selection: { direction, status }, requests, nextReads }, roomId);
     }, { requestSelection: { direction, status } });
   }
   selected(token, roomId, requestMessageId, options = {}) {
