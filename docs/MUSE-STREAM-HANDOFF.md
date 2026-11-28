@@ -115,6 +115,20 @@ rearm after the result. This protects against the conversation failing after
 the result write. Recovery from a failure before settlement still needs a
 working host that can resume the original request.
 
+During that wait, rollover and stop records appear under `prearmedReceiver`
+in the private status file when it still contains the matching handoff.
+The outer handoff retains its original time and receipt so `--recover` can
+recheck the exact open request. Compare the nested status with the host's
+current background-task state before treating the successor as running.
+
+If the host confirms that the prearmed helper exited before publishing its
+next handoff, it can restart the exact approved command on the same private
+checkpoint. The helper verifies the saved predecessor's terminal state,
+then resumes any still-eligible unpublished successor through its original
+acknowledgment operation. When the successor's offer was already published,
+use the existing interruption recovery for that offer. A saved checkpoint or
+duplicate acknowledgment alone provides no evidence that a model turn ran.
+
 If the host has a working stream listener of its own, let that listener
 invoke the helper with `--once` after a matching event. The helper verifies
 the open scope and returns `handoff` or `no_work` without opening another
@@ -228,7 +242,9 @@ conversation, start `--recover` in that conversation before `--stay-armed`.
 Use the same private policy directory and connection for both. Confirm that
 both processes are alive. The recovery process watches the primary's local
 handoff record. After an exact offer, it allows 6.5 seconds for the model to pick up the
-request, then reads that exact request once. It re-delivers an open pointer at
+request, then reads that exact request. If an offer with the original helper
+receipt returns `reply_request_not_found`, recovery checks that the same offer
+is still current and retries its exact read once. It re-delivers an open pointer at
 most once when it is unseen or still carries only the original helper's
 receipt. An ordinary agent acknowledgment, accepted or working progress, or a
 settled request ends recovery. The recovery offer carries the original helper
@@ -240,6 +256,12 @@ receiving turn already acknowledged it, inspect current state before doing
 work. If the write response is lost, look up the original operation before
 acting. Before submitting, read the latest exact answer basis. Room revision
 and terminal checks protect the answer if offers overlap.
+
+If stderr reports `offer_unreadable`, keep the original request and
+checkpoint. Check both existing host task records before re-arming either
+helper. If a task ended, use the existing launch procedure in the same Muse
+conversation with the same saved connection. The error reports the outcome of
+the exact read. Host state comes from the host task records.
 
 The recovery waits on a local file event with a one-time deadline for that
 offer. It uses no scheduled task and starts no second Room subscription.
